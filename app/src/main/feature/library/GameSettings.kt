@@ -82,6 +82,7 @@ import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import androidx.compose.ui.window.PopupProperties
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.MutableState
 import androidx.compose.runtime.SideEffect
@@ -97,6 +98,10 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusProperties
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -2628,6 +2633,25 @@ private fun ReshadeCatalogDialog(
     val scope = rememberCoroutineScope()
     val mainHandler = remember { android.os.Handler(android.os.Looper.getMainLooper()) }
 
+    // This catalog is a top-level Dialog, so its subcomposition inherits the settings pane's registry
+    // as LocalPaneNav. Give it its own registry and register that as the parent's overlay while shown
+    // — same wiring as the dropdown-option popup — so the parent delegates the D-pad to us instead of
+    // keeping the outline pinned on "Done" while every catalog item piles into the parent registry.
+    val parentNav = LocalPaneNav.current
+    val catalogNav = remember { PaneNavRegistry() }
+    catalogNav.controllerActive = parentNav?.controllerActive == true
+    DisposableEffect(Unit) {
+        catalogNav.reset()
+        parentNav?.overlay = catalogNav
+        parentNav?.overlayClose = onDismiss
+        onDispose {
+            if (parentNav?.overlay === catalogNav) {
+                parentNav.overlay = null
+                parentNav.overlayClose = null
+            }
+        }
+    }
+
     var catalog by remember { mutableStateOf<List<ReshadeCatalogEntry>>(emptyList()) }
     var installed by remember { mutableStateOf(setOf<String>()) }
     var source by remember { mutableStateOf(ReshadeCatalog.Source.NONE) }
@@ -2637,6 +2661,13 @@ private fun ReshadeCatalogDialog(
     var phaseLabel by remember { mutableStateOf("") }
     var progress by remember { mutableStateOf(0f) }
     var errorMsg by remember { mutableStateOf<String?>(null) }
+    // After a download completes the row hops Available→Installed (new LazyColumn key → new composable).
+    // We stash the finished id here so the moved row (not "Done") is the sole nav entry; a one-shot
+    // LaunchedEffect below re-seats the pane-nav cursor onto its new slot, keeping the controller in the
+    // list instead of drifting to the search field. refocusId also gates Done's isEntry so only one item
+    // is ever the entry (two entries + a pending reset would fight over the cursor).
+    var refocusId by remember { mutableStateOf<String?>(null) }
+    var reseatPending by remember { mutableStateOf(false) }
 
     val downloadingLabel = stringResource(R.string.reshade_catalog_downloading)
     val installingLabel = stringResource(R.string.reshade_catalog_installing)
@@ -2674,6 +2705,19 @@ private fun ReshadeCatalogDialog(
     val installedRows = groups.first
     val availableRows = groups.second
 
+    // Once the just-downloaded row has re-composed inside the Installed group, its paneNavItem has run
+    // markEntry (it passes isEntry while it matches refocusId), so entrySlot now points at the new slot.
+    // reset() re-arms pendingEntry and selects that entry, landing the cursor on the moved row. One-shot:
+    // reseatPending guards against re-running on later recompositions (e.g. every search keystroke),
+    // and refocusId is deliberately kept so the row — not Done — stays the entry until the next download.
+    LaunchedEffect(reseatPending, installedRows) {
+        val id = refocusId ?: return@LaunchedEffect
+        if (reseatPending && installedRows.any { it.id == id }) {
+            catalogNav.reset()
+            reseatPending = false
+        }
+    }
+
     fun startDownload(entry: ReshadeCatalogEntry) {
         downloadingId = entry.id
         phaseLabel = downloadingLabel; progress = 0f; errorMsg = null
@@ -2691,6 +2735,10 @@ private fun ReshadeCatalogDialog(
                 // new effect shows in the dropdown (reshadeEffectEntries) and becomes the active one.
                 val names = withContext(Dispatchers.IO) { ReshadeManager.scanEffectNames(context) }
                 applyReshadeEntries(context, state, names, selectId = entry.id)
+                // Keep the controller in the list: re-seat the cursor on this row once it re-composes
+                // under the Installed group (see the LaunchedEffect keyed on installedRows below).
+                refocusId = entry.id
+                reseatPending = true
             } else {
                 errorMsg = context.getString(R.string.reshade_catalog_download_failed, entry.name)
             }
@@ -2701,6 +2749,7 @@ private fun ReshadeCatalogDialog(
         onDismissRequest = onDismiss,
         properties = DialogProperties(usePlatformDefaultWidth = false)
     ) {
+      CompositionLocalProvider(LocalPaneNav provides catalogNav) {
         Column(
             modifier = Modifier
                 .fillMaxWidth(0.92f)
@@ -2725,7 +2774,7 @@ private fun ReshadeCatalogDialog(
                     fontWeight = FontWeight.Medium,
                     modifier = Modifier
                         .clip(RoundedCornerShape(6.dp))
-                        .paneNavItem(cornerRadius = 6.dp, onActivate = onDismiss, highlightColor = NavHighlight)
+                        .paneNavItem(cornerRadius = 6.dp, onActivate = onDismiss, isEntry = refocusId == null, highlightColor = NavHighlight)
                         .clickable(onClick = onDismiss)
                         .padding(horizontal = 10.dp, vertical = 4.dp)
                 )
@@ -2771,6 +2820,7 @@ private fun ReshadeCatalogDialog(
                                 phaseLabel = if (downloadingId == entry.id) phaseLabel else "",
                                 progress = if (downloadingId == entry.id) progress else null,
                                 installingLabel = installingLabel,
+                                isEntry = entry.id == refocusId,
                                 onClick = {
                                     // Select this installed effect as the active one, then close.
                                     val idx = state.reshadeEffectEntries.value
@@ -2819,15 +2869,25 @@ private fun ReshadeCatalogDialog(
                 }
             }
         }
+      }
     }
 }
 
 @Composable
 private fun ReshadeCatalogSearchField(query: String, onQueryChange: (String) -> Unit) {
     val keyboard = LocalSoftwareKeyboardController.current
-    var isEditing by remember { mutableStateOf(false) }
-    LaunchedEffect(isEditing) {
-        if (isEditing) { keyboard?.show(); isEditing = false }
+    val focusRequester = remember { FocusRequester() }
+    val tapInteraction = remember { MutableInteractionSource() }
+    // The field is only focusable while the user is explicitly editing. Otherwise a recompose — e.g. a
+    // downloaded row hopping Available→Installed and disposing the focused node — could hand IME focus
+    // to this field and pop the keyboard. editing is armed only by a controller A press (onActivate) or
+    // a deliberate tap, so it never auto-acquires focus.
+    var editing by remember { mutableStateOf(false) }
+    LaunchedEffect(editing) {
+        if (editing) {
+            runCatching { focusRequester.requestFocus() }
+            keyboard?.show()
+        }
     }
     BasicTextField(
         value = query,
@@ -2838,7 +2898,10 @@ private fun ReshadeCatalogSearchField(query: String, onQueryChange: (String) -> 
         modifier = Modifier
             .fillMaxWidth()
             .height(EnvVarControlHeight)
-            .paneNavItem(cornerRadius = 8.dp, onActivate = { isEditing = true }, highlightColor = NavHighlight)
+            .paneNavItem(cornerRadius = 8.dp, onActivate = { editing = true }, highlightColor = NavHighlight)
+            .focusRequester(focusRequester)
+            .focusProperties { canFocus = editing }
+            .onFocusChanged { if (!it.isFocused) editing = false }
             .controllerTextFieldEscape(),
         decorationBox = { innerTextField ->
             Row(
@@ -2847,6 +2910,9 @@ private fun ReshadeCatalogSearchField(query: String, onQueryChange: (String) -> 
                     .clip(RoundedCornerShape(8.dp))
                     .background(InputSurface)
                     .border(1.dp, InputBorder, RoundedCornerShape(8.dp))
+                    // Explicit tap arms editing before requesting focus, since canFocus is gated off
+                    // until then — this preserves touch: tapping the box still opens the keyboard.
+                    .clickable(interactionSource = tapInteraction, indication = null) { editing = true }
                     .padding(horizontal = SettingFieldHorizontalPadding),
                 verticalAlignment = Alignment.CenterVertically
             ) {
@@ -2896,6 +2962,7 @@ private fun ReshadeCatalogRow(
     phaseLabel: String,
     progress: Float?,
     installingLabel: String,
+    isEntry: Boolean = false,
     onClick: () -> Unit,
 ) {
     val contentAlpha = if (isInstalled || isBusy) 1f else 0.5f
@@ -2903,7 +2970,7 @@ private fun ReshadeCatalogRow(
         Modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(SettingFieldCorner))
-            .paneNavItem(cornerRadius = SettingFieldCorner, onActivate = { if (!isBusy) onClick() }, highlightColor = NavHighlight)
+            .paneNavItem(cornerRadius = SettingFieldCorner, onActivate = { if (!isBusy) onClick() }, isEntry = isEntry, highlightColor = NavHighlight)
             .clickable(enabled = !isBusy, onClick = onClick)
             .padding(horizontal = 4.dp, vertical = 10.dp)
     ) {
