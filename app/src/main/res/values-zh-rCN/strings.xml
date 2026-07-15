@@ -1565,5 +1565,25 @@
     <string name="steam_chat_setting_stay_running">在后台运行</string>
     <string name="steam_chat_setting_stay_running_desc">退出 WinNative 后保持聊天运行</string>
     <string name="settings_content_refresh">刷新</string>
+    <!-- ReShade -->
+    <string name="reshade_section_title">ReShade</string>
+    <string name="reshade_effect_label">ReShade 效果</string>
+    <string name="reshade_none">无</string>
+    <string name="reshade_section_hint">通过内置的 vkBasalt 层将 ReShade 效果（.fx）应用于 DXVK/VKD3D（Vulkan）游戏。将每个效果放入 Android/data/&lt;package&gt;/files/ReShade/ 下各自的文件夹中。实时参数调整和游戏内开关将随实时重载层更新一起提供。</string>
+    <string name="reshade_empty_hint">未找到效果。请在 Android/data/&lt;package&gt;/files/ReShade/ 下添加一个 ReShade 效果文件夹（.fx 以及任何 .fxh/纹理）。</string>
+    <string name="reshade_browse">浏览 &amp; 下载效果</string>
+    <string name="reshade_catalog_title">ReShade 效果</string>
+    <string name="reshade_catalog_search">搜索效果…</string>
+    <string name="reshade_catalog_installed">已安装 (%1$d)</string>
+    <string name="reshade_catalog_available">可用 (%1$d)</string>
+    <string name="reshade_catalog_downloading">正在下载</string>
+    <string name="reshade_catalog_installing">正在安装</string>
+    <string name="reshade_catalog_offline_cache">离线 — 显示缓存列表。连接以下载新效果。</string>
+    <string name="reshade_catalog_offline_none">离线 — 仅显示已安装的效果。连接以浏览目录。</string>
+    <string name="reshade_catalog_needs_connection">连接到互联网以下载效果。</string>
+    <string name="reshade_catalog_download_failed">下载 %1$s 失败。</string>
+    <string name="reshade_catalog_empty_query">没有与 \"%1$s\" 匹配的效果。</string>
+    <string name="reshade_catalog_empty">没有可用的效果。连接到互联网以浏览目录。</string>
+    <string name="reshade_catalog_done">完成</string>
 </resources>
 

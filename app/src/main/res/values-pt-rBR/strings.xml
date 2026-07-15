@@ -1565,5 +1565,25 @@ Caminho instalado:
     <string name="steam_chat_setting_stay_running">Executar em segundo plano</string>
     <string name="steam_chat_setting_stay_running_desc">Manter o chat ativo após sair do WinNative</string>
     <string name="settings_content_refresh">Atualizar</string>
+    <!-- ReShade -->
+    <string name="reshade_section_title">ReShade</string>
+    <string name="reshade_effect_label">Efeito ReShade</string>
+    <string name="reshade_none">Nenhum</string>
+    <string name="reshade_section_hint">Aplique um efeito ReShade (.fx) a jogos DXVK/VKD3D (Vulkan) por meio da camada vkBasalt integrada. Coloque cada efeito em sua própria pasta em Android/data/&lt;package&gt;/files/ReShade/. O ajuste de parâmetros ao vivo e o botão no jogo chegarão com a atualização da camada de recarregamento ao vivo.</string>
+    <string name="reshade_empty_hint">Nenhum efeito encontrado. Adicione uma pasta de efeito ReShade (o .fx mais quaisquer .fxh/texturas) em Android/data/&lt;package&gt;/files/ReShade/.</string>
+    <string name="reshade_browse">Explorar &amp; baixar efeitos</string>
+    <string name="reshade_catalog_title">Efeitos ReShade</string>
+    <string name="reshade_catalog_search">Pesquisar efeitos…</string>
+    <string name="reshade_catalog_installed">Instalados (%1$d)</string>
+    <string name="reshade_catalog_available">Disponíveis (%1$d)</string>
+    <string name="reshade_catalog_downloading">Baixando</string>
+    <string name="reshade_catalog_installing">Instalando</string>
+    <string name="reshade_catalog_offline_cache">Offline — mostrando uma lista em cache. Conecte-se para baixar novos efeitos.</string>
+    <string name="reshade_catalog_offline_none">Offline — mostrando apenas os efeitos instalados. Conecte-se para explorar o catálogo.</string>
+    <string name="reshade_catalog_needs_connection">Conecte-se à internet para baixar efeitos.</string>
+    <string name="reshade_catalog_download_failed">Falha ao baixar %1$s.</string>
+    <string name="reshade_catalog_empty_query">Nenhum efeito corresponde a \"%1$s\".</string>
+    <string name="reshade_catalog_empty">Nenhum efeito disponível. Conecte-se à internet para explorar o catálogo.</string>
+    <string name="reshade_catalog_done">Concluído</string>
 </resources>
 

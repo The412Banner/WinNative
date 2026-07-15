@@ -1562,4 +1562,24 @@
     <string name="file_manager_create_folder_failed">สร้างโฟลเดอร์ล้มเหลว</string>
 
     <string name="settings_content_refresh">รีเฟรช</string>
+    <!-- ReShade -->
+    <string name="reshade_section_title">ReShade</string>
+    <string name="reshade_effect_label">เอฟเฟกต์ ReShade</string>
+    <string name="reshade_none">ไม่มี</string>
+    <string name="reshade_section_hint">ใช้เอฟเฟกต์ ReShade (.fx) กับเกม DXVK/VKD3D (Vulkan) ผ่านเลเยอร์ vkBasalt ที่มาพร้อมในตัว วางเอฟเฟกต์แต่ละรายการไว้ในโฟลเดอร์ของตัวเองภายใต้ Android/data/&lt;package&gt;/files/ReShade/ การปรับพารามิเตอร์แบบเรียลไทม์และสวิตช์ในเกมจะมาพร้อมกับการอัปเดตเลเยอร์แบบโหลดซ้ำทันที</string>
+    <string name="reshade_empty_hint">ไม่พบเอฟเฟกต์ เพิ่มโฟลเดอร์เอฟเฟกต์ ReShade (ไฟล์ .fx พร้อมกับ .fxh/พื้นผิวใด ๆ) ภายใต้ Android/data/&lt;package&gt;/files/ReShade/</string>
+    <string name="reshade_browse">เรียกดู &amp; ดาวน์โหลดเอฟเฟกต์</string>
+    <string name="reshade_catalog_title">เอฟเฟกต์ ReShade</string>
+    <string name="reshade_catalog_search">ค้นหาเอฟเฟกต์…</string>
+    <string name="reshade_catalog_installed">ติดตั้งแล้ว (%1$d)</string>
+    <string name="reshade_catalog_available">พร้อมใช้งาน (%1$d)</string>
+    <string name="reshade_catalog_downloading">กำลังดาวน์โหลด</string>
+    <string name="reshade_catalog_installing">กำลังติดตั้ง</string>
+    <string name="reshade_catalog_offline_cache">ออฟไลน์ — กำลังแสดงรายการที่แคชไว้ เชื่อมต่อเพื่อดาวน์โหลดเอฟเฟกต์ใหม่</string>
+    <string name="reshade_catalog_offline_none">ออฟไลน์ — กำลังแสดงเฉพาะเอฟเฟกต์ที่ติดตั้งไว้ เชื่อมต่อเพื่อเรียกดูแคตตาล็อก</string>
+    <string name="reshade_catalog_needs_connection">เชื่อมต่ออินเทอร์เน็ตเพื่อดาวน์โหลดเอฟเฟกต์</string>
+    <string name="reshade_catalog_download_failed">ดาวน์โหลด %1$s ไม่สำเร็จ</string>
+    <string name="reshade_catalog_empty_query">ไม่มีเอฟเฟกต์ที่ตรงกับ \"%1$s\"</string>
+    <string name="reshade_catalog_empty">ไม่มีเอฟเฟกต์ที่พร้อมใช้งาน เชื่อมต่ออินเทอร์เน็ตเพื่อเรียกดูแคตตาล็อก</string>
+    <string name="reshade_catalog_done">เสร็จสิ้น</string>
 </resources>

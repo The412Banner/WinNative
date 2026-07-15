@@ -649,8 +649,8 @@ private fun buildSections(isSteam: Boolean, isContainer: Boolean): List<Pair<Int
     list += SEC_GENERAL to SidebarSection(Icons.Outlined.Tune, R.string.settings_general_title)
     if (isSteam) list += SEC_STEAM to SidebarSection(Icons.Outlined.Science, R.string.steam_section_title)
     list += SEC_DISPLAY to SidebarSection(Icons.Outlined.Monitor, R.string.common_ui_graphics)
-    list += SEC_RESHADE to SidebarSection(Icons.Outlined.AutoAwesome, R.string.reshade_section_title)
     list += SEC_ADVANCED to SidebarSection(Icons.Outlined.Settings, R.string.common_ui_advanced)
+    list += SEC_RESHADE to SidebarSection(Icons.Outlined.AutoAwesome, R.string.reshade_section_title)
     list += SEC_INPUT to SidebarSection(Icons.Outlined.SportsEsports, R.string.common_ui_input_controls)
     if (isContainer) {
         list += SEC_DRIVES to SidebarSection(Icons.Outlined.Storage, R.string.container_config_drives)
@@ -2546,7 +2546,10 @@ private fun ReshadeCatalogSearchField(query: String, onQueryChange: (String) -> 
                 if (query.isNotEmpty()) {
                     Icon(
                         Icons.Outlined.Close, contentDescription = null, tint = TextDim,
-                        modifier = Modifier.size(SettingIconSize).clickable { onQueryChange("") }
+                        modifier = Modifier
+                            .size(SettingIconSize)
+                            .paneNavItem(cornerRadius = 6.dp, onActivate = { onQueryChange("") }, highlightColor = NavHighlight)
+                            .clickable { onQueryChange("") }
                     )
                 }
             }

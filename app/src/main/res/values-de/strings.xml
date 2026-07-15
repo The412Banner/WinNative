@@ -1566,4 +1566,24 @@ Installierter Pfad:
     <string name="steam_chat_setting_stay_running">Im Hintergrund ausführen</string>
     <string name="steam_chat_setting_stay_running_desc">Chat nach dem Beenden von WinNative weiterlaufen lassen</string>
     <string name="settings_content_refresh">Aktualisieren</string>
+    <!-- ReShade -->
+    <string name="reshade_section_title">ReShade</string>
+    <string name="reshade_effect_label">ReShade-Effekt</string>
+    <string name="reshade_none">Keiner</string>
+    <string name="reshade_section_hint">Wende über die integrierte vkBasalt-Ebene einen ReShade-Effekt (.fx) auf DXVK/VKD3D-Spiele (Vulkan) an. Lege jeden Effekt in einen eigenen Ordner unter Android/data/&lt;package&gt;/files/ReShade/. Live-Parameteranpassung und der In-Game-Schalter kommen mit dem Live-Reload-Ebenen-Update.</string>
+    <string name="reshade_empty_hint">Keine Effekte gefunden. Füge einen ReShade-Effektordner (die .fx plus etwaige .fxh/Texturen) unter Android/data/&lt;package&gt;/files/ReShade/ hinzu.</string>
+    <string name="reshade_browse">Effekte durchsuchen &amp; herunterladen</string>
+    <string name="reshade_catalog_title">ReShade-Effekte</string>
+    <string name="reshade_catalog_search">Effekte suchen…</string>
+    <string name="reshade_catalog_installed">Installiert (%1$d)</string>
+    <string name="reshade_catalog_available">Verfügbar (%1$d)</string>
+    <string name="reshade_catalog_downloading">Wird heruntergeladen</string>
+    <string name="reshade_catalog_installing">Wird installiert</string>
+    <string name="reshade_catalog_offline_cache">Offline — zwischengespeicherte Liste wird angezeigt. Verbinde dich, um neue Effekte herunterzuladen.</string>
+    <string name="reshade_catalog_offline_none">Offline — nur installierte Effekte werden angezeigt. Verbinde dich, um den Katalog zu durchsuchen.</string>
+    <string name="reshade_catalog_needs_connection">Stelle eine Internetverbindung her, um Effekte herunterzuladen.</string>
+    <string name="reshade_catalog_download_failed">%1$s konnte nicht heruntergeladen werden.</string>
+    <string name="reshade_catalog_empty_query">Keine Effekte passen zu \"%1$s\".</string>
+    <string name="reshade_catalog_empty">Keine Effekte verfügbar. Stelle eine Internetverbindung her, um den Katalog zu durchsuchen.</string>
+    <string name="reshade_catalog_done">Fertig</string>
 </resources>

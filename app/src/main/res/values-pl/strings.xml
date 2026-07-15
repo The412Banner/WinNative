@@ -1571,5 +1571,25 @@ Zainstalowana ścieżka:
     <string name="steam_chat_setting_stay_running">Uruchom w tle</string>
     <string name="steam_chat_setting_stay_running_desc">Pozostaw czat aktywny po zamknięciu WinNative</string>
     <string name="settings_content_refresh">Odśwież</string>
+    <!-- ReShade -->
+    <string name="reshade_section_title">ReShade</string>
+    <string name="reshade_effect_label">Efekt ReShade</string>
+    <string name="reshade_none">Brak</string>
+    <string name="reshade_section_hint">Zastosuj efekt ReShade (.fx) do gier DXVK/VKD3D (Vulkan) za pomocą wbudowanej warstwy vkBasalt. Umieść każdy efekt w osobnym folderze w Android/data/&lt;package&gt;/files/ReShade/. Dostrajanie parametrów na żywo i przełącznik w grze pojawią się wraz z aktualizacją warstwy przeładowywanej na żywo.</string>
+    <string name="reshade_empty_hint">Nie znaleziono efektów. Dodaj folder efektu ReShade (plik .fx oraz ewentualne .fxh/tekstury) w Android/data/&lt;package&gt;/files/ReShade/.</string>
+    <string name="reshade_browse">Przeglądaj &amp; pobierz efekty</string>
+    <string name="reshade_catalog_title">Efekty ReShade</string>
+    <string name="reshade_catalog_search">Szukaj efektów…</string>
+    <string name="reshade_catalog_installed">Zainstalowane (%1$d)</string>
+    <string name="reshade_catalog_available">Dostępne (%1$d)</string>
+    <string name="reshade_catalog_downloading">Pobieranie</string>
+    <string name="reshade_catalog_installing">Instalowanie</string>
+    <string name="reshade_catalog_offline_cache">Offline — wyświetlanie listy z pamięci podręcznej. Połącz się, aby pobrać nowe efekty.</string>
+    <string name="reshade_catalog_offline_none">Offline — wyświetlanie tylko zainstalowanych efektów. Połącz się, aby przeglądać katalog.</string>
+    <string name="reshade_catalog_needs_connection">Połącz się z internetem, aby pobrać efekty.</string>
+    <string name="reshade_catalog_download_failed">Nie udało się pobrać %1$s.</string>
+    <string name="reshade_catalog_empty_query">Żaden efekt nie pasuje do \"%1$s\".</string>
+    <string name="reshade_catalog_empty">Brak dostępnych efektów. Połącz się z internetem, aby przeglądać katalog.</string>
+    <string name="reshade_catalog_done">Gotowe</string>
 </resources>
 

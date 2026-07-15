@@ -1565,5 +1565,25 @@ Percorso installato:
     <string name="steam_chat_setting_stay_running">Esegui in background</string>
     <string name="steam_chat_setting_stay_running_desc">Mantieni la chat attiva dopo aver chiuso WinNative</string>
     <string name="settings_content_refresh">Aggiorna</string>
+    <!-- ReShade -->
+    <string name="reshade_section_title">ReShade</string>
+    <string name="reshade_effect_label">Effetto ReShade</string>
+    <string name="reshade_none">Nessuno</string>
+    <string name="reshade_section_hint">Applica un effetto ReShade (.fx) ai giochi DXVK/VKD3D (Vulkan) tramite il livello vkBasalt integrato. Metti ogni effetto in una propria cartella in Android/data/&lt;package&gt;/files/ReShade/. La regolazione dei parametri in tempo reale e l\'interruttore in gioco arriveranno con l\'aggiornamento del livello a ricaricamento immediato.</string>
+    <string name="reshade_empty_hint">Nessun effetto trovato. Aggiungi una cartella di effetti ReShade (il .fx più eventuali .fxh/texture) in Android/data/&lt;package&gt;/files/ReShade/.</string>
+    <string name="reshade_browse">Sfoglia &amp; scarica effetti</string>
+    <string name="reshade_catalog_title">Effetti ReShade</string>
+    <string name="reshade_catalog_search">Cerca effetti…</string>
+    <string name="reshade_catalog_installed">Installati (%1$d)</string>
+    <string name="reshade_catalog_available">Disponibili (%1$d)</string>
+    <string name="reshade_catalog_downloading">Download in corso</string>
+    <string name="reshade_catalog_installing">Installazione in corso</string>
+    <string name="reshade_catalog_offline_cache">Offline — visualizzazione di un elenco memorizzato nella cache. Connettiti per scaricare nuovi effetti.</string>
+    <string name="reshade_catalog_offline_none">Offline — visualizzazione dei soli effetti installati. Connettiti per sfogliare il catalogo.</string>
+    <string name="reshade_catalog_needs_connection">Connettiti a Internet per scaricare effetti.</string>
+    <string name="reshade_catalog_download_failed">Impossibile scaricare %1$s.</string>
+    <string name="reshade_catalog_empty_query">Nessun effetto corrisponde a \"%1$s\".</string>
+    <string name="reshade_catalog_empty">Nessun effetto disponibile. Connettiti a Internet per sfogliare il catalogo.</string>
+    <string name="reshade_catalog_done">Fatto</string>
 </resources>
 

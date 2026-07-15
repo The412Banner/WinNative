@@ -1564,5 +1564,25 @@ Cale instalata:
     <string name="steam_chat_setting_stay_running">Rulează în fundal</string>
     <string name="steam_chat_setting_stay_running_desc">Menține chatul activ după ce ieși din WinNative</string>
     <string name="settings_content_refresh">Reîmprospătează</string>
+    <!-- ReShade -->
+    <string name="reshade_section_title">ReShade</string>
+    <string name="reshade_effect_label">Efect ReShade</string>
+    <string name="reshade_none">Niciunul</string>
+    <string name="reshade_section_hint">Aplică un efect ReShade (.fx) jocurilor DXVK/VKD3D (Vulkan) prin stratul vkBasalt integrat. Pune fiecare efect în propriul folder în Android/data/&lt;package&gt;/files/ReShade/. Reglarea parametrilor în timp real și comutatorul din joc vor sosi odată cu actualizarea stratului cu reîncărcare în timp real.</string>
+    <string name="reshade_empty_hint">Niciun efect găsit. Adaugă un folder de efect ReShade (fișierul .fx plus eventualele .fxh/texturi) în Android/data/&lt;package&gt;/files/ReShade/.</string>
+    <string name="reshade_browse">Răsfoiește &amp; descarcă efecte</string>
+    <string name="reshade_catalog_title">Efecte ReShade</string>
+    <string name="reshade_catalog_search">Caută efecte…</string>
+    <string name="reshade_catalog_installed">Instalate (%1$d)</string>
+    <string name="reshade_catalog_available">Disponibile (%1$d)</string>
+    <string name="reshade_catalog_downloading">Se descarcă</string>
+    <string name="reshade_catalog_installing">Se instalează</string>
+    <string name="reshade_catalog_offline_cache">Offline — se afișează o listă din cache. Conectează-te pentru a descărca efecte noi.</string>
+    <string name="reshade_catalog_offline_none">Offline — se afișează doar efectele instalate. Conectează-te pentru a răsfoi catalogul.</string>
+    <string name="reshade_catalog_needs_connection">Conectează-te la internet pentru a descărca efecte.</string>
+    <string name="reshade_catalog_download_failed">Descărcarea %1$s a eșuat.</string>
+    <string name="reshade_catalog_empty_query">Niciun efect nu corespunde cu \"%1$s\".</string>
+    <string name="reshade_catalog_empty">Niciun efect disponibil. Conectează-te la internet pentru a răsfoi catalogul.</string>
+    <string name="reshade_catalog_done">Gata</string>
 </resources>
 
