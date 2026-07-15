@@ -527,6 +527,16 @@ class ContainerSettingsComposeDialog @JvmOverloads constructor(
         state.surfaceEffectEntries.value = surfaceEffectArr
         state.selectedSurfaceEffect.intValue = if (c?.getExtra("swapRB", "0") == "1") 1 else 0
 
+        // ReShade drop-in effect (container default; persisted as the effect's folder name, "None" = 0)
+        val reshadeEntries = ArrayList<String>()
+        reshadeEntries.add(context.getString(R.string.reshade_none))
+        reshadeEntries.addAll(com.winlator.cmod.runtime.reshade.ReshadeManager.scanEffectNames(context))
+        state.reshadeEffectEntries.value = reshadeEntries
+        val savedReshade = c?.getExtra(
+            com.winlator.cmod.runtime.reshade.ReshadeConfigWriter.EXTRA_EFFECT, "") ?: ""
+        val reshadeIdx = reshadeEntries.indexOfFirst { it.equals(savedReshade, ignoreCase = true) }
+        state.selectedReshadeEffect.intValue = if (reshadeIdx >= 0) reshadeIdx else 0
+
         val audioDriverArr = context.resources.getStringArray(R.array.audio_driver_entries).toList()
         state.audioDriverEntries.value = audioDriverArr
         selectByIdentifier(
@@ -793,6 +803,13 @@ class ContainerSettingsComposeDialog @JvmOverloads constructor(
             c.setDXWrapper(dxwrapper)
             c.setDXWrapperConfig(dxwrapperConfig)
             c.putExtra("swapRB", if (state.selectedSurfaceEffect.intValue == 1) "1" else "0")
+            run {
+                val reshadeEntries = state.reshadeEffectEntries.value
+                val idx = state.selectedReshadeEffect.intValue
+                val effectName = if (idx in 1 until reshadeEntries.size) reshadeEntries[idx] else null
+                c.putExtra(
+                    com.winlator.cmod.runtime.reshade.ReshadeConfigWriter.EXTRA_EFFECT, effectName)
+            }
             c.setAudioDriver(audioDriver)
             c.setEmulator(emulator)
             c.setEmulator64(emulator64)

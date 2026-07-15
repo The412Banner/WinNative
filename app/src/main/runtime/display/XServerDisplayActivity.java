@@ -82,6 +82,7 @@ import com.winlator.cmod.shared.android.AppUtils;
 import com.winlator.cmod.shared.android.AppTerminationHelper;
 import com.winlator.cmod.shared.ui.toast.WinToast;
 import com.winlator.cmod.runtime.wine.EnvVars;
+import com.winlator.cmod.runtime.reshade.ReshadeConfigWriter;
 import com.winlator.cmod.runtime.wine.LocaleEnv;
 import com.winlator.cmod.shared.io.FileUtils;
 import com.winlator.cmod.runtime.system.CPUStatus;
@@ -645,6 +646,24 @@ public class XServerDisplayActivity extends FixedFontScaleAppCompatActivity {
 
     private String getShortcutSetting(String key, String containerValue) {
         return shortcut != null ? shortcut.getSettingExtra(key, containerValue) : containerValue;
+    }
+
+    // Resolve the selected ReShade drop-in effect (shortcut override, else container) and hand it to
+    // ReshadeConfigWriter, which stages the effect files, writes vkBasalt.conf, and sets the enabling
+    // env when applicable. Fully self-contained + swallowed: a ReShade failure must never break a
+    // launch.
+    private void applyReshadeEnv(EnvVars envVars) {
+        try {
+            if (container == null || imageFs == null) return;
+            String effect = getShortcutSetting(
+                    ReshadeConfigWriter.EXTRA_EFFECT, container.getExtra(ReshadeConfigWriter.EXTRA_EFFECT));
+            String params = getShortcutSetting(
+                    ReshadeConfigWriter.EXTRA_PARAMS, container.getExtra(ReshadeConfigWriter.EXTRA_PARAMS));
+            boolean vulkanWrapper = ReshadeConfigWriter.supportedFor(this.dxwrapper);
+            ReshadeConfigWriter.apply(this, imageFs, effect, params, vulkanWrapper, envVars);
+        } catch (Exception e) {
+            Log.e("XServerDisplayActivity", "ReShade env injection failed (ignored)", e);
+        }
     }
 
     private boolean getBooleanSessionOption(String key, boolean defaultValue) {
@@ -6533,6 +6552,13 @@ public class XServerDisplayActivity extends FixedFontScaleAppCompatActivity {
                     rawShortcutEnvVars + "' container='" + container.getEnvVars() +
                     "' effective='" + effectiveCustomEnvVars + "'");
             envVars.putAll(effectiveCustomEnvVars);
+
+            // ReShade (vkBasalt) — apply the per-game/container selected drop-in effect via the
+            // already-bundled vkBasalt implicit layer. No-op unless an effect is selected AND the DX
+            // wrapper is Vulkan-backed (DXVK/VKD3D). Runs after custom env: if the user already set
+            // ENABLE_VKBASALT themselves, ReshadeConfigWriter detects it and backs off (user wins).
+            // Never throws into the launch path.
+            applyReshadeEnv(envVars);
 
             // Steam-style launch options: KEY=VALUE tokens before %command% become env vars.
             String launchOptsForEnv = shortcut != null

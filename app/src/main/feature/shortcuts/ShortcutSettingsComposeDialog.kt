@@ -503,6 +503,18 @@ class ShortcutSettingsComposeDialog private constructor(
                 ?.coerceIn(0, 100)
                 ?: 100
 
+        // ReShade drop-in effect (per-game; persisted as the effect's folder name, "None" = index 0)
+        val reshadeEntries = ArrayList<String>()
+        reshadeEntries.add(context.getString(R.string.reshade_none))
+        reshadeEntries.addAll(com.winlator.cmod.runtime.reshade.ReshadeManager.scanEffectNames(context))
+        state.reshadeEffectEntries.value = reshadeEntries
+        val savedReshade = getShortcutSetting(
+            com.winlator.cmod.runtime.reshade.ReshadeConfigWriter.EXTRA_EFFECT,
+            container.getExtra(com.winlator.cmod.runtime.reshade.ReshadeConfigWriter.EXTRA_EFFECT, "")
+        )
+        val reshadeIdx = reshadeEntries.indexOfFirst { it.equals(savedReshade, ignoreCase = true) }
+        state.selectedReshadeEffect.intValue = if (reshadeIdx >= 0) reshadeIdx else 0
+
         // Graphics driver (basic entries - will be updated after contents sync)
         val graphicsDriverArr =
             context.resources.getStringArray(R.array.graphics_driver_entries).toList()
@@ -1246,6 +1258,15 @@ class ShortcutSettingsComposeDialog private constructor(
                 shortcut.putExtra("sgsrEnabled", null)
                 shortcut.putExtra("sgsrUpscaleMode", null)
                 shortcut.putExtra("sgsrSharpness", null)
+            }
+
+            // ReShade drop-in effect (per-game). Index 0 == "None" -> clear the extra.
+            run {
+                val reshadeEntries = state.reshadeEffectEntries.value
+                val idx = state.selectedReshadeEffect.intValue
+                val effectName = if (idx in 1 until reshadeEntries.size) reshadeEntries[idx] else null
+                shortcut.putExtra(
+                    com.winlator.cmod.runtime.reshade.ReshadeConfigWriter.EXTRA_EFFECT, effectName)
             }
 
             // Desktop Theme — stored as compound "THEME,TYPE,COLOR" string
