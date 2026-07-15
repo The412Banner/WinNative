@@ -2412,23 +2412,7 @@ private fun ReshadeParamControls(state: GameSettingsStateHolder) {
                         onSelected = { state.reshadeParamValues[p.name] = it.toFloat() }
                     )
                 }
-                ReshadeManager.ParamType.COLOR -> {
-                    for (c in 0 until p.components) {
-                        val key = p.name + "_" + c
-                        val cur = state.reshadeParamValues[key]
-                            ?: (p.componentDefaults?.getOrNull(c) ?: 0f)
-                        if (c > 0) Spacer(Modifier.height(SettingTightGap))
-                        ReshadeFloatSlider(
-                            label = p.label + " " + reshadeColorComponentLabel(c, p.components),
-                            value = cur,
-                            min = 0f,
-                            max = 1f,
-                            step = 0.01f,
-                            whole = false,
-                            onValueChange = { state.reshadeParamValues[key] = it }
-                        )
-                    }
-                }
+                ReshadeManager.ParamType.COLOR -> ReshadeColorControl(state, p)
                 ReshadeManager.ParamType.INT -> {
                     val v = state.reshadeParamValues[p.name] ?: p.defaultValue
                     ReshadeFloatSlider(
@@ -2454,6 +2438,70 @@ private fun ReshadeParamControls(state: GameSettingsStateHolder) {
                     )
                 }
             }
+        }
+    }
+}
+
+// Color param rendered as a tappable swatch that expands to per-channel (R/G/B[/A]) sliders, instead
+// of always-visible channel sliders — cuts the clutter on color-grading effects (many float3 colors).
+@Composable
+private fun ReshadeColorControl(state: GameSettingsStateHolder, p: ReshadeManager.ReshadeParam) {
+    val expanded = remember(p.name) { mutableStateOf(false) }
+
+    fun comp(c: Int): Float =
+        state.reshadeParamValues[p.name + "_" + c] ?: (p.componentDefaults?.getOrNull(c) ?: 0f)
+    val r = comp(0)
+    val g = if (p.components > 1) comp(1) else r
+    val b = if (p.components > 2) comp(2) else r
+    val swatch = Color(r.coerceIn(0f, 1f), g.coerceIn(0f, 1f), b.coerceIn(0f, 1f))
+
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(8.dp))
+            .paneNavItem(
+                cornerRadius = 8.dp,
+                onActivate = { expanded.value = !expanded.value },
+                highlightColor = NavHighlight,
+                tapToSelect = true,
+            )
+            .clickable { expanded.value = !expanded.value }
+            .padding(vertical = 4.dp)
+    ) {
+        Box(
+            Modifier
+                .size(22.dp)
+                .clip(RoundedCornerShape(5.dp))
+                .background(swatch)
+                .border(1.dp, CardBorder, RoundedCornerShape(5.dp))
+        )
+        Spacer(Modifier.width(10.dp))
+        Text(
+            text = p.label,
+            color = TextPrimary,
+            fontSize = SettingLabelSize,
+            modifier = Modifier.weight(1f)
+        )
+        Icon(
+            imageVector = if (expanded.value) Icons.Outlined.KeyboardArrowUp else Icons.Outlined.KeyboardArrowDown,
+            contentDescription = null,
+            tint = TextSecondary
+        )
+    }
+    if (expanded.value) {
+        for (c in 0 until p.components) {
+            val key = p.name + "_" + c
+            Spacer(Modifier.height(SettingTightGap))
+            ReshadeFloatSlider(
+                label = reshadeColorComponentLabel(c, p.components),
+                value = state.reshadeParamValues[key] ?: (p.componentDefaults?.getOrNull(c) ?: 0f),
+                min = 0f,
+                max = 1f,
+                step = 0.01f,
+                whole = false,
+                onValueChange = { state.reshadeParamValues[key] = it }
+            )
         }
     }
 }
