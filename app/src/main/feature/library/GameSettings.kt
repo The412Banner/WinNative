@@ -138,7 +138,12 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
 import androidx.compose.foundation.focusable
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onKeyEvent
+import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.ui.input.key.type
 import com.winlator.cmod.shared.ui.focus.controllerFocusBorder
 import com.winlator.cmod.shared.ui.focus.controllerFocusGlow
 import com.winlator.cmod.shared.ui.focus.controllerSliderEscape
@@ -2669,6 +2674,20 @@ private fun ReshadeCatalogDialog(
     var refocusId by remember { mutableStateOf<String?>(null) }
     var reseatPending by remember { mutableStateOf(false) }
 
+    // The catalog Dialog is a separate focusable window, so UnifiedActivity.dispatchKeyEvent never sees
+    // its D-pad events — they'd otherwise fall to Android's default focus traversal (a dark box walking
+    // the rows) and never reach catalogNav. We hold focus on the dialog root and preview-intercept the
+    // D-pad, routing it into catalogNav.navDir so the blue pane-nav outline moves like everywhere else.
+    val rootFocus = remember { FocusRequester() }
+    // Search editing is owned here (hoisted out of ReshadeCatalogSearchField) so the preview handler can
+    // stand down while the user types in the text field, then re-grab focus when editing ends.
+    var searchEditing by remember { mutableStateOf(false) }
+
+    // Grab focus on open, and re-grab it whenever search editing ends, so the root keeps previewing keys.
+    LaunchedEffect(searchEditing) {
+        if (!searchEditing) runCatching { rootFocus.requestFocus() }
+    }
+
     val downloadingLabel = stringResource(R.string.reshade_catalog_downloading)
     val installingLabel = stringResource(R.string.reshade_catalog_installing)
 
@@ -2757,6 +2776,33 @@ private fun ReshadeCatalogDialog(
                 .clip(RoundedCornerShape(SettingGroupCorner))
                 .background(ContentBg)
                 .border(1.dp, CardBorder, RoundedCornerShape(SettingGroupCorner))
+                // Root holds focus so it previews every key BEFORE default traversal moves the dark box;
+                // handled keys are consumed (return true) so that box never budges. onPreviewKeyEvent must
+                // sit before focusRequester/focusable so this focus target is the one that receives them.
+                .onPreviewKeyEvent { ev ->
+                    if (ev.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
+                    // While the search field is being edited, let it consume typing + directions itself;
+                    // only ButtonB/Back is stolen back here to exit editing (which re-grabs root focus).
+                    if (searchEditing) {
+                        return@onPreviewKeyEvent when (ev.key) {
+                            Key.ButtonB, Key.Back -> { searchEditing = false; true }
+                            else -> false
+                        }
+                    }
+                    when (ev.key) {
+                        Key.DirectionUp -> { catalogNav.navDir(PANE_DIR_UP); true }
+                        Key.DirectionDown -> { catalogNav.navDir(PANE_DIR_DOWN); true }
+                        Key.DirectionLeft -> { catalogNav.navDir(PANE_DIR_LEFT); true }
+                        Key.DirectionRight -> { catalogNav.navDir(PANE_DIR_RIGHT); true }
+                        Key.ButtonA, Key.Enter, Key.NumPadEnter, Key.DirectionCenter -> {
+                            catalogNav.navDir(PANE_DIR_ACTIVATE); true
+                        }
+                        Key.ButtonB, Key.Back -> { onDismiss(); true }
+                        else -> false
+                    }
+                }
+                .focusRequester(rootFocus)
+                .focusable()
                 .padding(16.dp)
         ) {
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
@@ -2793,7 +2839,12 @@ private fun ReshadeCatalogDialog(
             }
 
             Spacer(Modifier.height(10.dp))
-            ReshadeCatalogSearchField(query = query, onQueryChange = { query = it })
+            ReshadeCatalogSearchField(
+                query = query,
+                onQueryChange = { query = it },
+                editing = searchEditing,
+                onEditingChange = { searchEditing = it },
+            )
             Spacer(Modifier.height(8.dp))
 
             errorMsg?.let {
@@ -2874,15 +2925,20 @@ private fun ReshadeCatalogDialog(
 }
 
 @Composable
-private fun ReshadeCatalogSearchField(query: String, onQueryChange: (String) -> Unit) {
+private fun ReshadeCatalogSearchField(
+    query: String,
+    onQueryChange: (String) -> Unit,
+    editing: Boolean,
+    onEditingChange: (Boolean) -> Unit,
+) {
     val keyboard = LocalSoftwareKeyboardController.current
     val focusRequester = remember { FocusRequester() }
     val tapInteraction = remember { MutableInteractionSource() }
     // The field is only focusable while the user is explicitly editing. Otherwise a recompose — e.g. a
     // downloaded row hopping Available→Installed and disposing the focused node — could hand IME focus
     // to this field and pop the keyboard. editing is armed only by a controller A press (onActivate) or
-    // a deliberate tap, so it never auto-acquires focus.
-    var editing by remember { mutableStateOf(false) }
+    // a deliberate tap, so it never auto-acquires focus. editing is hoisted into ReshadeCatalogDialog so
+    // its root key-preview handler can stand down while the field is being typed into.
     LaunchedEffect(editing) {
         if (editing) {
             runCatching { focusRequester.requestFocus() }
@@ -2898,10 +2954,10 @@ private fun ReshadeCatalogSearchField(query: String, onQueryChange: (String) -> 
         modifier = Modifier
             .fillMaxWidth()
             .height(EnvVarControlHeight)
-            .paneNavItem(cornerRadius = 8.dp, onActivate = { editing = true }, highlightColor = NavHighlight)
+            .paneNavItem(cornerRadius = 8.dp, onActivate = { onEditingChange(true) }, highlightColor = NavHighlight)
             .focusRequester(focusRequester)
             .focusProperties { canFocus = editing }
-            .onFocusChanged { if (!it.isFocused) editing = false }
+            .onFocusChanged { if (!it.isFocused) onEditingChange(false) }
             .controllerTextFieldEscape(),
         decorationBox = { innerTextField ->
             Row(
@@ -2912,7 +2968,7 @@ private fun ReshadeCatalogSearchField(query: String, onQueryChange: (String) -> 
                     .border(1.dp, InputBorder, RoundedCornerShape(8.dp))
                     // Explicit tap arms editing before requesting focus, since canFocus is gated off
                     // until then — this preserves touch: tapping the box still opens the keyboard.
-                    .clickable(interactionSource = tapInteraction, indication = null) { editing = true }
+                    .clickable(interactionSource = tapInteraction, indication = null) { onEditingChange(true) }
                     .padding(horizontal = SettingFieldHorizontalPadding),
                 verticalAlignment = Alignment.CenterVertically
             ) {
