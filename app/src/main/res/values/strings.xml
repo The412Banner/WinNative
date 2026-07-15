@@ -492,6 +492,8 @@
     <string name="reshade_catalog_empty_query">No effects match \"%1$s\".</string>
     <string name="reshade_catalog_empty">No effects available. Connect to the internet to browse the catalog.</string>
     <string name="reshade_catalog_done">Done</string>
+    <string name="reshade_params_title">EFFECT PARAMETERS</string>
+    <string name="reshade_params_reset">Reset</string>
 
     <!-- Container > Box64 -->
     <string name="container_box64_title">Box64</string>

@@ -33,6 +33,8 @@ import com.winlator.cmod.app.PluviaApp
 import com.winlator.cmod.feature.library.DriveItem
 import com.winlator.cmod.feature.library.EnvVarItem
 import com.winlator.cmod.feature.library.parseEnvVarItems
+import com.winlator.cmod.feature.library.reshadeParamsToJson
+import com.winlator.cmod.feature.library.seedReshadeParams
 import androidx.compose.runtime.getValue
 import com.winlator.cmod.feature.library.GameSettingsCallbacks
 import com.winlator.cmod.feature.library.GameSettingsContent
@@ -514,6 +516,18 @@ class ShortcutSettingsComposeDialog private constructor(
         )
         val reshadeIdx = reshadeEntries.indexOfFirst { it.equals(savedReshade, ignoreCase = true) }
         state.selectedReshadeEffect.intValue = if (reshadeIdx >= 0) reshadeIdx else 0
+
+        // Seed the per-effect param model from the saved reshadeParams JSON + .fx defaults so the
+        // pre-launch controls open on the persisted values (launch path applies the same key scheme).
+        val savedReshadeParams = getShortcutSetting(
+            com.winlator.cmod.runtime.reshade.ReshadeConfigWriter.EXTRA_PARAMS,
+            container.getExtra(com.winlator.cmod.runtime.reshade.ReshadeConfigWriter.EXTRA_PARAMS, "")
+        )
+        val loadedReshadeEffect = if (reshadeIdx >= 1) reshadeEntries[reshadeIdx] else ""
+        state.reshadeSavedEffect.value = loadedReshadeEffect
+        state.reshadeSavedParamsJson.value = savedReshadeParams
+        seedReshadeParams(
+            context, state, loadedReshadeEffect.ifEmpty { null }, savedReshadeParams)
 
         // Graphics driver (basic entries - will be updated after contents sync)
         val graphicsDriverArr =
@@ -1267,6 +1281,11 @@ class ShortcutSettingsComposeDialog private constructor(
                 val effectName = if (idx in 1 until reshadeEntries.size) reshadeEntries[idx] else null
                 shortcut.putExtra(
                     com.winlator.cmod.runtime.reshade.ReshadeConfigWriter.EXTRA_EFFECT, effectName)
+                // Per-uniform overrides: serialize to the reshadeParams JSON extra (null when None /
+                // no params so the launch path falls back to .fx defaults).
+                val reshadeParams = if (effectName == null) null else reshadeParamsToJson(state)
+                shortcut.putExtra(
+                    com.winlator.cmod.runtime.reshade.ReshadeConfigWriter.EXTRA_PARAMS, reshadeParams)
             }
 
             // Desktop Theme — stored as compound "THEME,TYPE,COLOR" string

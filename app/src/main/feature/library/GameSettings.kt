@@ -88,6 +88,7 @@ import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.Stable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -130,6 +131,7 @@ import com.winlator.cmod.runtime.wine.WineThemeManager
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import org.json.JSONObject
 import androidx.compose.foundation.focusable
 import androidx.compose.ui.input.key.onKeyEvent
 import com.winlator.cmod.shared.ui.focus.controllerFocusBorder
@@ -402,6 +404,17 @@ class GameSettingsStateHolder {
     // ReshadeManager.scanEffectNames().
     val reshadeEffectEntries = mutableStateOf(listOf("None"))
     val selectedReshadeEffect = mutableIntStateOf(0)
+
+    // Per-effect ReShade parameter overrides (persisted as the "reshadeParams" JSON extra). Current
+    // values are keyed by the shared ReshadeManager.seedValues scheme: scalar/bool/combo -> "<name>",
+    // color -> "<name>_<component>". reshadeParamDefs is the reflected uniform list for the currently
+    // selected effect (empty for "None"); both are seeded at load from the saved JSON + .fx defaults
+    // and re-seeded when the effect selection changes. reshadeSavedEffect/reshadeSavedParamsJson keep
+    // the as-loaded values so a live switch back to the loaded effect restores its saved overrides.
+    val reshadeParamValues = mutableStateMapOf<String, Float>()
+    val reshadeParamDefs = mutableStateOf<List<ReshadeManager.ReshadeParam>>(emptyList())
+    val reshadeSavedEffect = mutableStateOf("")
+    val reshadeSavedParamsJson = mutableStateOf("")
 
     // Graphics Driver Configuration (inline card)
     val gfxConfigExpanded = mutableStateOf(false)
@@ -2205,9 +2218,26 @@ private fun WineD3DConfigCard(state: GameSettingsStateHolder) {
 
 @Composable
 private fun ReshadeSection(state: GameSettingsStateHolder) {
+    val context = LocalContext.current
     val entries = state.reshadeEffectEntries.value
     val hasEffects = entries.size > 1  // entries[0] is always "None"
     var showCatalog by remember { mutableStateOf(false) }
+
+    // Re-seed the param model whenever the selected effect changes. Keyed on the effect NAME so
+    // in-place control edits (which never change the selected name) are not clobbered. Switching back
+    // to the as-loaded effect restores its saved overrides; any other effect seeds from .fx defaults.
+    val selectedIdx = state.selectedReshadeEffect.intValue
+    val selectedName = entries.getOrNull(selectedIdx)
+    LaunchedEffect(selectedName, selectedIdx) {
+        if (selectedName == null || selectedIdx < 1) {
+            state.reshadeParamDefs.value = emptyList()
+            state.reshadeParamValues.clear()
+        } else {
+            val useSaved = selectedName.equals(state.reshadeSavedEffect.value, ignoreCase = true)
+            val savedJson = if (useSaved) state.reshadeSavedParamsJson.value else null
+            withContext(Dispatchers.IO) { seedReshadeParams(context, state, selectedName, savedJson) }
+        }
+    }
 
     SubsectionLabel(stringResource(R.string.reshade_section_title))
     Spacer(Modifier.height(8.dp))
@@ -2267,8 +2297,245 @@ private fun ReshadeSection(state: GameSettingsStateHolder) {
         }
     }
 
+    // Typed pre-launch controls for the selected effect's reflected uniforms. Written to the
+    // reshadeParams extra on save; the launch path (ReshadeConfigWriter) applies them.
+    if (selectedIdx >= 1) {
+        ReshadeParamControls(state)
+    }
+
     if (showCatalog) {
         ReshadeCatalogDialog(state = state, onDismiss = { showCatalog = false })
+    }
+}
+
+// Reflect the selected effect's uniforms and seed the value map (saved JSON wins over .fx defaults).
+// effectName null/blank -> clears the model. Reads the effect's .fx off the caller's thread; callers
+// on the main thread do this synchronously (a small local read, same as scanEffectNames), the live
+// selection-change path wraps it in Dispatchers.IO.
+internal fun seedReshadeParams(
+    context: android.content.Context,
+    state: GameSettingsStateHolder,
+    effectName: String?,
+    savedJson: String?
+) {
+    val defs: List<ReshadeManager.ReshadeParam> =
+        if (effectName.isNullOrBlank()) emptyList()
+        else ReshadeManager.findEffect(context, effectName)?.params ?: emptyList()
+    val saved: JSONObject? = try {
+        if (!savedJson.isNullOrBlank()) JSONObject(savedJson) else null
+    } catch (e: Exception) { null }
+    val values = LinkedHashMap<String, Float>()
+    for (p in defs) ReshadeManager.seedValues(p, saved, values)
+    state.reshadeParamDefs.value = defs
+    state.reshadeParamValues.clear()
+    state.reshadeParamValues.putAll(values)
+}
+
+// Restore every param of the selected effect to its .fx default (re-seed with no saved overrides).
+private fun resetReshadeParams(state: GameSettingsStateHolder) {
+    val values = LinkedHashMap<String, Float>()
+    for (p in state.reshadeParamDefs.value) ReshadeManager.seedValues(p, null, values)
+    state.reshadeParamValues.clear()
+    state.reshadeParamValues.putAll(values)
+}
+
+// Serialize the current param value map to a JSON string in the shared seedValues key scheme, or null
+// when there is nothing to persist (None selected / no reflected params). Written to the reshadeParams
+// extra by both editors' save paths.
+internal fun reshadeParamsToJson(state: GameSettingsStateHolder): String? {
+    if (state.reshadeParamDefs.value.isEmpty() || state.reshadeParamValues.isEmpty()) return null
+    val obj = JSONObject()
+    for ((k, v) in state.reshadeParamValues) obj.put(k, v.toDouble())
+    return if (obj.length() == 0) null else obj.toString()
+}
+
+private fun reshadeColorComponentLabel(c: Int, components: Int): String = when {
+    components >= 4 && c == 3 -> "A"
+    c == 0 -> "R"
+    c == 1 -> "G"
+    c == 2 -> "B"
+    else -> (c + 1).toString()
+}
+
+@Composable
+private fun ReshadeParamControls(state: GameSettingsStateHolder) {
+    val defs = state.reshadeParamDefs.value
+    if (defs.isEmpty()) return
+
+    Spacer(Modifier.height(SettingSectionGap))
+    SettingGroup {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                text = stringResource(R.string.reshade_params_title),
+                color = TextSecondary,
+                fontSize = SettingSectionLabelSize,
+                fontWeight = FontWeight.SemiBold,
+                letterSpacing = 0.8.sp,
+                modifier = Modifier.weight(1f)
+            )
+            Text(
+                text = stringResource(R.string.reshade_params_reset),
+                color = AccentBlue,
+                fontSize = SettingLabelSize,
+                fontWeight = FontWeight.Medium,
+                modifier = Modifier
+                    .clip(RoundedCornerShape(6.dp))
+                    .paneNavItem(
+                        cornerRadius = 6.dp,
+                        onActivate = { resetReshadeParams(state) },
+                        highlightColor = NavHighlight,
+                        tapToSelect = true,
+                    )
+                    .clickable { resetReshadeParams(state) }
+                    .padding(horizontal = 8.dp, vertical = 4.dp)
+            )
+        }
+
+        for (p in defs) {
+            Spacer(Modifier.height(SettingItemGap))
+            when (p.type) {
+                ReshadeManager.ParamType.BOOL -> {
+                    val v = state.reshadeParamValues[p.name] ?: p.defaultValue
+                    SettingCheckbox(
+                        label = p.label,
+                        checked = v != 0f,
+                        onCheckedChange = { state.reshadeParamValues[p.name] = if (it) 1f else 0f }
+                    )
+                }
+                ReshadeManager.ParamType.COMBO -> {
+                    val options = p.options ?: emptyList()
+                    val v = (state.reshadeParamValues[p.name] ?: p.defaultValue).roundToInt()
+                    SettingDropdown(
+                        label = p.label,
+                        entries = options,
+                        selectedIndex = v.coerceIn(0, (options.size - 1).coerceAtLeast(0)),
+                        onSelected = { state.reshadeParamValues[p.name] = it.toFloat() }
+                    )
+                }
+                ReshadeManager.ParamType.COLOR -> {
+                    for (c in 0 until p.components) {
+                        val key = p.name + "_" + c
+                        val cur = state.reshadeParamValues[key]
+                            ?: (p.componentDefaults?.getOrNull(c) ?: 0f)
+                        if (c > 0) Spacer(Modifier.height(SettingTightGap))
+                        ReshadeFloatSlider(
+                            label = p.label + " " + reshadeColorComponentLabel(c, p.components),
+                            value = cur,
+                            min = 0f,
+                            max = 1f,
+                            step = 0.01f,
+                            whole = false,
+                            onValueChange = { state.reshadeParamValues[key] = it }
+                        )
+                    }
+                }
+                ReshadeManager.ParamType.INT -> {
+                    val v = state.reshadeParamValues[p.name] ?: p.defaultValue
+                    ReshadeFloatSlider(
+                        label = p.label,
+                        value = v,
+                        min = p.min,
+                        max = p.max,
+                        step = if (p.step > 0f) p.step else 1f,
+                        whole = true,
+                        onValueChange = { state.reshadeParamValues[p.name] = it }
+                    )
+                }
+                else -> { // FLOAT
+                    val v = state.reshadeParamValues[p.name] ?: p.defaultValue
+                    ReshadeFloatSlider(
+                        label = p.label,
+                        value = v,
+                        min = p.min,
+                        max = p.max,
+                        step = p.step,
+                        whole = false,
+                        onValueChange = { state.reshadeParamValues[p.name] = it }
+                    )
+                }
+            }
+        }
+    }
+}
+
+// Float-valued slider matching SettingSlider's look, used for FLOAT/INT scalars and COLOR components.
+// [whole] snaps to integers (INT); otherwise snaps to [step]. D-pad adjust steps by one increment.
+@Composable
+@OptIn(ExperimentalMaterial3Api::class)
+private fun ReshadeFloatSlider(
+    label: String,
+    value: Float,
+    min: Float,
+    max: Float,
+    step: Float,
+    whole: Boolean,
+    onValueChange: (Float) -> Unit
+) {
+    val lo = min
+    val hi = if (max > min) max else min + 1f
+    val inc = if (whole) 1f else (if (step > 0f) step else (hi - lo) / 100f)
+    val valueText = if (whole) value.roundToInt().toString()
+        else String.format(java.util.Locale.US, "%.2f", value)
+
+    fun snap(raw: Float): Float {
+        val v = when {
+            whole -> raw.roundToInt().toFloat()
+            step > 0f -> lo + Math.round((raw - lo) / step) * step
+            else -> raw
+        }
+        return v.coerceIn(lo, hi)
+    }
+
+    Column(modifier = Modifier.fillMaxWidth()) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                label,
+                color = TextSecondary,
+                fontSize = SettingLabelSize,
+                fontWeight = FontWeight.Medium,
+                letterSpacing = 0.3.sp
+            )
+            Spacer(Modifier.weight(1f))
+            Box(
+                modifier = Modifier
+                    .clip(RoundedCornerShape(6.dp))
+                    .background(AccentBlue.copy(alpha = 0.1f))
+                    .padding(horizontal = 7.dp, vertical = 2.dp)
+            ) {
+                Text(
+                    valueText,
+                    color = AccentBlue,
+                    fontSize = SettingLabelSize,
+                    fontWeight = FontWeight.SemiBold
+                )
+            }
+        }
+        Spacer(Modifier.height(SettingTightGap))
+        Slider(
+            value = value.coerceIn(lo, hi),
+            onValueChange = { onValueChange(snap(it)) },
+            valueRange = lo..hi,
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(SettingSliderHeight)
+                .controllerSliderEscape()
+                .paneNavItem(
+                    cornerRadius = 8.dp,
+                    onAdjust = { d -> onValueChange((value + d * inc).coerceIn(lo, hi)) },
+                    highlightColor = NavHighlight,
+                ),
+            colors = settingSliderColors(),
+            track = { SettingSliderTrack(it) },
+            thumb = {
+                Box(
+                    modifier = Modifier
+                        .size(SettingSliderThumbSize)
+                        .clip(RoundedCornerShape(50))
+                        .background(AccentBlue)
+                        .border(2.dp, CardSurface, RoundedCornerShape(50))
+                )
+            }
+        )
     }
 }
 
