@@ -1274,18 +1274,25 @@ class ShortcutSettingsComposeDialog private constructor(
                 shortcut.putExtra("sgsrSharpness", null)
             }
 
-            // ReShade drop-in effect (per-game). Index 0 == "None" -> clear the extra.
+            // ReShade drop-in effect + per-uniform params (per-game). Route through saveOverride so they
+            // participate in the container-defaults flag: a bare putExtra left hasContainerOverride false,
+            // so a shortcut whose only change was ReShade got use_container_defaults=1 and getSettingExtra
+            // shadowed its own reshadeEffect/reshadeParams with the container value on read. Index 0 = None.
             run {
                 val reshadeEntries = state.reshadeEffectEntries.value
                 val idx = state.selectedReshadeEffect.intValue
-                val effectName = if (idx in 1 until reshadeEntries.size) reshadeEntries[idx] else null
-                shortcut.putExtra(
-                    com.winlator.cmod.runtime.reshade.ReshadeConfigWriter.EXTRA_EFFECT, effectName)
-                // Per-uniform overrides: serialize to the reshadeParams JSON extra (null when None /
-                // no params so the launch path falls back to .fx defaults).
-                val reshadeParams = if (effectName == null) null else reshadeParamsToJson(state)
-                shortcut.putExtra(
-                    com.winlator.cmod.runtime.reshade.ReshadeConfigWriter.EXTRA_PARAMS, reshadeParams)
+                val effectName = if (idx in 1 until reshadeEntries.size) reshadeEntries[idx] else ""
+                hasContainerOverride = hasContainerOverride or saveOverride(
+                    com.winlator.cmod.runtime.reshade.ReshadeConfigWriter.EXTRA_EFFECT,
+                    effectName,
+                    container.getExtra(com.winlator.cmod.runtime.reshade.ReshadeConfigWriter.EXTRA_EFFECT, "")
+                )
+                val reshadeParams = if (effectName.isEmpty()) "" else (reshadeParamsToJson(state) ?: "")
+                hasContainerOverride = hasContainerOverride or saveOverride(
+                    com.winlator.cmod.runtime.reshade.ReshadeConfigWriter.EXTRA_PARAMS,
+                    reshadeParams,
+                    container.getExtra(com.winlator.cmod.runtime.reshade.ReshadeConfigWriter.EXTRA_PARAMS, "")
+                )
             }
 
             // Desktop Theme — stored as compound "THEME,TYPE,COLOR" string
