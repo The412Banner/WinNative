@@ -89,6 +89,7 @@ import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.Stable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -2856,66 +2857,74 @@ private fun ReshadeCatalogDialog(
                     Text(stringResource(R.string.reshade_catalog_downloading), color = TextSecondary, fontSize = SettingValueSize)
                 }
             } else {
-                LazyColumn(Modifier.fillMaxWidth().weight(1f)) {
+                // Plain Column + verticalScroll (NOT LazyColumn): a LazyColumn only composes visible
+                // rows, so paneNav can't register or scroll past the on-screen items. Composing every
+                // row (~100) lets the D-pad walk the whole list and paneNavItem's bringIntoView scroll to
+                // the highlighted one — same pattern as ExtensionsPickerDialog. key() keeps the i_/a_
+                // prefixes so a downloaded row's Available->Installed hop still gets a fresh slot (reseat).
+                Column(
+                    Modifier
+                        .fillMaxWidth()
+                        .weight(1f)
+                        .verticalScroll(rememberScrollState())
+                ) {
                     if (installedRows.isNotEmpty()) {
-                        item("__installed_hdr__") {
-                            ReshadeGroupHeader(stringResource(R.string.reshade_catalog_installed, installedRows.size))
-                        }
-                        items(installedRows, key = { "i_${it.id}" }) { entry ->
-                            ReshadeCatalogRow(
-                                entry = entry,
-                                isInstalled = true,
-                                isSelected = entry.name.equals(selectedName, ignoreCase = true),
-                                isBusy = downloadingId == entry.id,
-                                offline = offline,
-                                phaseLabel = if (downloadingId == entry.id) phaseLabel else "",
-                                progress = if (downloadingId == entry.id) progress else null,
-                                installingLabel = installingLabel,
-                                isEntry = entry.id == refocusId,
-                                onClick = {
-                                    // Select this installed effect as the active one, then close.
-                                    val idx = state.reshadeEffectEntries.value
-                                        .indexOfFirst { it.equals(entry.name, ignoreCase = true) }
-                                    if (idx >= 0) state.selectedReshadeEffect.intValue = idx
-                                    onDismiss()
-                                }
-                            )
+                        ReshadeGroupHeader(stringResource(R.string.reshade_catalog_installed, installedRows.size))
+                        installedRows.forEach { entry ->
+                            key("i_${entry.id}") {
+                                ReshadeCatalogRow(
+                                    entry = entry,
+                                    isInstalled = true,
+                                    isSelected = entry.name.equals(selectedName, ignoreCase = true),
+                                    isBusy = downloadingId == entry.id,
+                                    offline = offline,
+                                    phaseLabel = if (downloadingId == entry.id) phaseLabel else "",
+                                    progress = if (downloadingId == entry.id) progress else null,
+                                    installingLabel = installingLabel,
+                                    isEntry = entry.id == refocusId,
+                                    onClick = {
+                                        // Select this installed effect as the active one, then close.
+                                        val idx = state.reshadeEffectEntries.value
+                                            .indexOfFirst { it.equals(entry.name, ignoreCase = true) }
+                                        if (idx >= 0) state.selectedReshadeEffect.intValue = idx
+                                        onDismiss()
+                                    }
+                                )
+                            }
                         }
                     }
                     if (availableRows.isNotEmpty()) {
-                        item("__available_hdr__") {
-                            ReshadeGroupHeader(stringResource(R.string.reshade_catalog_available, availableRows.size))
-                        }
-                        items(availableRows, key = { "a_${it.id}" }) { entry ->
-                            ReshadeCatalogRow(
-                                entry = entry,
-                                isInstalled = false,
-                                isSelected = false,
-                                isBusy = downloadingId == entry.id,
-                                offline = offline,
-                                phaseLabel = if (downloadingId == entry.id) phaseLabel else "",
-                                progress = if (downloadingId == entry.id) progress else null,
-                                installingLabel = installingLabel,
-                                onClick = {
-                                    when {
-                                        downloadingId != null -> {}                 // one at a time
-                                        offline -> errorMsg = context.getString(R.string.reshade_catalog_needs_connection)
-                                        else -> startDownload(entry)
+                        ReshadeGroupHeader(stringResource(R.string.reshade_catalog_available, availableRows.size))
+                        availableRows.forEach { entry ->
+                            key("a_${entry.id}") {
+                                ReshadeCatalogRow(
+                                    entry = entry,
+                                    isInstalled = false,
+                                    isSelected = false,
+                                    isBusy = downloadingId == entry.id,
+                                    offline = offline,
+                                    phaseLabel = if (downloadingId == entry.id) phaseLabel else "",
+                                    progress = if (downloadingId == entry.id) progress else null,
+                                    installingLabel = installingLabel,
+                                    onClick = {
+                                        when {
+                                            downloadingId != null -> {}                 // one at a time
+                                            offline -> errorMsg = context.getString(R.string.reshade_catalog_needs_connection)
+                                            else -> startDownload(entry)
+                                        }
                                     }
-                                }
-                            )
+                                )
+                            }
                         }
                     }
                     if (installedRows.isEmpty() && availableRows.isEmpty()) {
-                        item("__empty__") {
-                            Text(
-                                if (query.isNotBlank()) stringResource(R.string.reshade_catalog_empty_query, query)
-                                else stringResource(R.string.reshade_catalog_empty),
-                                color = TextSecondary,
-                                fontSize = SettingValueSize,
-                                modifier = Modifier.padding(24.dp)
-                            )
-                        }
+                        Text(
+                            if (query.isNotBlank()) stringResource(R.string.reshade_catalog_empty_query, query)
+                            else stringResource(R.string.reshade_catalog_empty),
+                            color = TextSecondary,
+                            fontSize = SettingValueSize,
+                            modifier = Modifier.padding(24.dp)
+                        )
                     }
                 }
             }
