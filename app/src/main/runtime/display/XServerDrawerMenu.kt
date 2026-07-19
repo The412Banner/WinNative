@@ -168,7 +168,6 @@ import androidx.compose.ui.window.Popup
 import androidx.compose.ui.window.PopupPositionProvider
 import androidx.compose.ui.window.PopupProperties
 import com.winlator.cmod.R
-import com.winlator.cmod.runtime.reshade.ReshadeManager
 import com.winlator.cmod.shared.theme.WinNativeBackground
 import com.winlator.cmod.shared.theme.WinNativeOutline
 import com.winlator.cmod.shared.theme.WinNativePanel
@@ -640,14 +639,13 @@ data class XServerDrawerState(
     val pixelateBlock: Int = 6,
     val colorBlind: Int = 0,
     // ReShade in-game live control. Populated (and the RESHADE rail tab shown) only via withReshadeState,
-    // i.e. when a ReShade effect was applied at launch on a Vulkan wrapper so the patched vkBasalt layer
-    // is live. reshadeEffectNames[0] == "None"; reshadeParamValues keys follow ReshadeManager.seedValues
-    // (scalar/bool/combo -> "<name>", color -> "<name>_<component>").
-    val reshadeEnabled: Boolean = false,
-    val reshadeEffectNames: List<String> = emptyList(),
-    val reshadeSelectedIndex: Int = 0,
-    val reshadeParamDefs: List<ReshadeManager.ReshadeParam> = emptyList(),
-    val reshadeParamValues: Map<String, Float> = emptyMap(),
+    // i.e. when a ReShade LOADOUT was compiled at launch on a Vulkan wrapper so the patched vkBasalt
+    // layer is live. reshadeLoadout is the ordered set of compiled effects; each carries its own enabled
+    // gate + reflected params + live values (ReshadeManager.seedValues key scheme). reshadeMasterEnabled
+    // is the whole-chain passthrough; reshadeMode is "solo" (live switch) or "stack" (layer).
+    val reshadeMasterEnabled: Boolean = false,
+    val reshadeMode: String = "solo",
+    val reshadeLoadout: List<ReshadeLoadoutItem> = emptyList(),
     val inputControlsProfileNames: List<String> = emptyList(),
     val inputControlsSelectedProfileIndex: Int = 0,
     val inputControlsStyleNames: List<String> = emptyList(),
@@ -1072,14 +1070,21 @@ interface XServerDrawerActionListener {
 
     fun onResetEffects()
 
-    // ── ReShade live control ──
-    fun onReshadeEnabledChanged(enabled: Boolean)
+    // ── ReShade live control (multi-effect loadout) ──
+    // Whole-chain passthrough on/off.
+    fun onReshadeMasterEnabledChanged(enabled: Boolean)
 
-    fun onReshadeEffectSelected(index: Int)
+    // Flip one loadout effect's live gate. In solo mode enabling one bypasses the others (host-side).
+    fun onReshadeEffectEnabledChanged(index: Int, enabled: Boolean)
 
-    fun onReshadeParamChanged(key: String, value: Float)
+    // Switch solo <-> stack.
+    fun onReshadeModeChanged(mode: String)
 
-    fun onReshadeReset()
+    // Tune one effect's uniform (key = ReshadeManager.seedValues scheme).
+    fun onReshadeParamChanged(index: Int, key: String, value: Float)
+
+    // Reset one effect's params to its .fx defaults.
+    fun onReshadeReset(index: Int)
 
     fun onInputControlsProfileSelected(index: Int)
 
@@ -1518,11 +1523,9 @@ fun withVitureState(
 // in-game pane's rewrites take effect on the next frame. Mirrors withOutputState.
 fun withReshadeState(
     state: XServerDrawerState,
-    enabled: Boolean,
-    effectNames: List<String>,
-    selectedIndex: Int,
-    paramDefs: List<ReshadeManager.ReshadeParam>,
-    paramValues: Map<String, Float>,
+    masterEnabled: Boolean,
+    mode: String,
+    loadout: List<ReshadeLoadoutItem>,
     reshadeTitle: String,
 ): XServerDrawerState {
     val reshadeItem =
@@ -1531,15 +1534,13 @@ fun withReshadeState(
             title = reshadeTitle,
             subtitle = "",
             icon = Icons.Outlined.AutoAwesome,
-            active = enabled,
+            active = masterEnabled,
         )
     return state.copy(
         items = state.items + reshadeItem,
-        reshadeEnabled = enabled,
-        reshadeEffectNames = effectNames,
-        reshadeSelectedIndex = selectedIndex,
-        reshadeParamDefs = paramDefs,
-        reshadeParamValues = paramValues,
+        reshadeMasterEnabled = masterEnabled,
+        reshadeMode = mode,
+        reshadeLoadout = loadout,
     )
 }
 

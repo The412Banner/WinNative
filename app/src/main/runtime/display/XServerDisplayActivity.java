@@ -451,17 +451,29 @@ public class XServerDisplayActivity extends FixedFontScaleAppCompatActivity {
     private boolean pixelateEnabled = false;
     private int pixelateBlock = 6;
     private int colorBlind = 0;
-    // ReShade in-game live state. reshadeSessionAvailable is true only when applyReshadeEnv actually
-    // enabled the layer at launch (Vulkan wrapper + a selected effect) — the RESHADE drawer tab and the
-    // live conf rewrites are gated on it. reshadeEffectNames[0] == "None"; reshadeParamValues follows the
-    // ReshadeManager.seedValues key scheme (scalar/bool/combo -> "<name>", color -> "<name>_<component>").
+    // ReShade in-game live state. reshadeSessionAvailable is true only when applyReshadeEnv armed the
+    // layer at launch (Vulkan wrapper + a non-empty loadout) — the RESHADE drawer tab and the live conf
+    // rewrites gate on it. reshadeLive is the ordered working loadout the drawer edits: every effect was
+    // compiled into the vkBasalt chain at launch, so toggling an effect's `enabled` flips its live gate
+    // (solo switch / stack layer) with NO recompile. reshadeMasterEnabled = whole-chain passthrough.
     private boolean reshadeSessionAvailable = false;
-    private boolean reshadeEnabled = false;
-    private String reshadeEffectName = "";
-    private final java.util.ArrayList<String> reshadeEffectNames = new java.util.ArrayList<>();
-    private int reshadeSelectedIndex = 0;
-    private java.util.List<ReshadeManager.ReshadeParam> reshadeParamDefs = new java.util.ArrayList<>();
-    private final java.util.LinkedHashMap<String, Float> reshadeParamValues = new java.util.LinkedHashMap<>();
+    private boolean reshadeMasterEnabled = true;
+    private String reshadeMode = com.winlator.cmod.runtime.reshade.ReshadeLoadout.MODE_SOLO;
+    private final java.util.ArrayList<ReshadeLiveEffect> reshadeLive = new java.util.ArrayList<>();
+
+    // One effect in the in-game working loadout: its name, whether it presents, its reflected uniform
+    // defs, and the live value map (ReshadeManager.seedValues key scheme — "<uniform>" or "<uniform>_<c>"
+    // for COLOR). Edited by the drawer callbacks, serialized into the merged conf + persisted.
+    private static class ReshadeLiveEffect {
+        final String name;
+        boolean enabled;
+        final java.util.List<ReshadeManager.ReshadeParam> defs;
+        final java.util.LinkedHashMap<String, Float> values;
+        ReshadeLiveEffect(String name, boolean enabled, java.util.List<ReshadeManager.ReshadeParam> defs,
+                          java.util.LinkedHashMap<String, Float> values) {
+            this.name = name; this.enabled = enabled; this.defs = defs; this.values = values;
+        }
+    }
     private boolean gyroscopeCardExpanded = false;
     private XServerDrawerStateHolder drawerStateHolder;
     private XServerDrawerActionListener drawerActionListener;
@@ -681,105 +693,157 @@ public class XServerDisplayActivity extends FixedFontScaleAppCompatActivity {
         return shortcut != null ? shortcut.getSettingExtra(key, containerValue) : containerValue;
     }
 
-    // Resolve the selected ReShade drop-in effect (shortcut override, else container) and hand it to
-    // ReshadeConfigWriter, which stages the effect files, writes vkBasalt.conf, and sets the enabling
-    // env when applicable. Fully self-contained + swallowed: a ReShade failure must never break a
-    // launch.
+    // Resolved reshade config for a launch/relaunch: the loadout (ordered effects + enabled flags), the
+    // mode, the per-effect params + their nesting discriminator, the legacy effect (for flat-param
+    // migration), and the persisted master (whole-chain) switch.
+    private static class ResolvedReshade {
+        java.util.List<com.winlator.cmod.runtime.reshade.ReshadeLoadout.Entry> loadout;
+        String mode;
+        String paramsJson;   // nested {"<effect>":{uniform:value}} when nested==true, else flat legacy
+        boolean nested;      // whether a reshadeLoadout array was the source (params are nested)
+        String legacyEffect; // for flat-params migration
+        boolean masterEnabled = true;
+    }
+
+    // A shortcut OWNS the reshade config (read from it) when it holds its own settings (does NOT follow
+    // container defaults) AND carries a reshade extra (the loadout array or the legacy single effect);
+    // until then the container's config is authoritative. Blends WinNative's use_container_defaults guard
+    // with unit ownership so the loadout + its params stay coherent (never mixing shortcut mode with
+    // container effects).
+    private boolean reshadeShortcutOwns() {
+        if (shortcut == null || shortcut.usesContainerDefaults()) return false;
+        return !shortcut.getExtra(ReshadeConfigWriter.EXTRA_LOADOUT, "").isEmpty()
+                || !shortcut.getExtra(ReshadeConfigWriter.EXTRA_EFFECT, "").isEmpty();
+    }
+
+    // ReShade selection resolution. Reads the whole reshade config (loadout + mode + params + master) as
+    // a unit from the shortcut when it owns reshade, else the container. Resolving as a unit migrates
+    // legacy single-effect saves transparently (ReshadeLoadout.parse) and keeps the loadout coherent.
+    private ResolvedReshade resolveReshade() {
+        ResolvedReshade r = new ResolvedReshade();
+        r.mode = com.winlator.cmod.runtime.reshade.ReshadeLoadout.MODE_SOLO;
+        r.legacyEffect = "None";
+        if (container == null) {
+            r.loadout = new java.util.ArrayList<>();
+            r.nested = false;
+            return r;
+        }
+        String loadoutJson, mode, paramsJson, legacyEffect;
+        if (reshadeShortcutOwns()) {
+            loadoutJson  = emptyToNull(shortcut.getExtra(ReshadeConfigWriter.EXTRA_LOADOUT, null));
+            mode         = shortcut.getExtra(ReshadeConfigWriter.EXTRA_MODE, "solo");
+            paramsJson   = emptyToNull(shortcut.getExtra(ReshadeConfigWriter.EXTRA_PARAMS, null));
+            legacyEffect = shortcut.getExtra(ReshadeConfigWriter.EXTRA_EFFECT, "None");
+            r.masterEnabled = !"0".equals(shortcut.getExtra(ReshadeConfigWriter.EXTRA_MASTER, "1"));
+        } else {
+            loadoutJson  = emptyToNull(container.getExtra(ReshadeConfigWriter.EXTRA_LOADOUT, null));
+            mode         = container.getExtra(ReshadeConfigWriter.EXTRA_MODE, "solo");
+            paramsJson   = emptyToNull(container.getExtra(ReshadeConfigWriter.EXTRA_PARAMS, null));
+            legacyEffect = container.getExtra(ReshadeConfigWriter.EXTRA_EFFECT, "None");
+            r.masterEnabled = !"0".equals(container.getExtra(ReshadeConfigWriter.EXTRA_MASTER, "1"));
+        }
+        r.nested = loadoutJson != null && !loadoutJson.isEmpty();
+        r.loadout = com.winlator.cmod.runtime.reshade.ReshadeLoadout.parse(loadoutJson, legacyEffect);
+        r.mode = com.winlator.cmod.runtime.reshade.ReshadeLoadout.normalizeMode(mode);
+        r.paramsJson = paramsJson;
+        r.legacyEffect = legacyEffect;
+        // Solo safety: never light up two effects at once in solo mode.
+        com.winlator.cmod.runtime.reshade.ReshadeLoadout.enforceSolo(r.loadout, r.mode);
+        return r;
+    }
+
+    private static String emptyToNull(String s) { return (s == null || s.isEmpty()) ? null : s; }
+
+    // Resolve the per-game/container ReShade loadout and hand it to ReshadeConfigWriter, which stages
+    // EVERY effect's files, writes the merged vkBasalt.conf (chain + per-effect enable gates), and sets
+    // the enabling env when applicable. Fully self-contained + swallowed: a ReShade failure must never
+    // break a launch.
     private void applyReshadeEnv(EnvVars envVars) {
         try {
             if (container == null || imageFs == null) return;
-            String effect = getShortcutSetting(
-                    ReshadeConfigWriter.EXTRA_EFFECT, container.getExtra(ReshadeConfigWriter.EXTRA_EFFECT));
-            String params = getShortcutSetting(
-                    ReshadeConfigWriter.EXTRA_PARAMS, container.getExtra(ReshadeConfigWriter.EXTRA_PARAMS));
+            ResolvedReshade rr = resolveReshade();
             boolean vulkanWrapper = ReshadeConfigWriter.supportedFor(this.dxwrapper);
-            boolean applied = ReshadeConfigWriter.apply(this, imageFs, effect, params, vulkanWrapper, envVars);
+            boolean applied = ReshadeConfigWriter.applyLoadout(this, imageFs, rr.loadout, rr.paramsJson,
+                    rr.nested, rr.legacyEffect, rr.masterEnabled, vulkanWrapper, envVars);
             reshadeSessionAvailable = applied;
-            reshadeEnabled = applied;
-            reshadeEffectName = applied ? effect : "";
-            if (applied) initReshadeSessionState(effect, params);
+            reshadeMasterEnabled = rr.masterEnabled;
+            reshadeMode = rr.mode;
+            if (applied) seedReshadeLive(rr);
         } catch (Exception e) {
             Log.e("XServerDisplayActivity", "ReShade env injection failed (ignored)", e);
         }
     }
 
-    // Seed the in-game ReShade model once, on the launch path, when the layer is actually enabled: the
-    // "None" + drop-in effect list for the live switcher, the selected index, and the reflected uniform
-    // defs/values for the running effect (its saved params win over the .fx defaults). Fully swallowed.
-    private void initReshadeSessionState(String effectName, String paramsJson) {
-        try {
-            reshadeEffectNames.clear();
-            reshadeEffectNames.add(getString(R.string.reshade_none));
-            reshadeEffectNames.addAll(ReshadeManager.scanEffectNames(this));
-            reshadeSelectedIndex = 0;
-            for (int i = 1; i < reshadeEffectNames.size(); i++) {
-                if (reshadeEffectNames.get(i).equalsIgnoreCase(effectName)) { reshadeSelectedIndex = i; break; }
-            }
-            seedReshadeParams(effectName, paramsJson);
-        } catch (Exception e) {
-            Log.e("XServerDisplayActivity", "initReshadeSessionState failed (ignored)", e);
+    // Build the in-game working model from the resolved launch config (only effects actually present in
+    // the drop-in folder are tunable). Runs on the launch path when the layer was armed.
+    private void seedReshadeLive(ResolvedReshade rr) {
+        reshadeLive.clear();
+        for (com.winlator.cmod.runtime.reshade.ReshadeLoadout.Entry entry : rr.loadout) {
+            ReshadeManager.ReshadeEffect effect = ReshadeManager.findEffect(this, entry.name);
+            if (effect == null) continue;
+            org.json.JSONObject saved = com.winlator.cmod.runtime.reshade.ReshadeLoadout.paramsForEffect(
+                    rr.paramsJson, effect.name, rr.nested, rr.legacyEffect);
+            java.util.LinkedHashMap<String, Float> values = new java.util.LinkedHashMap<>();
+            for (ReshadeManager.ReshadeParam p : effect.params) ReshadeManager.seedValues(p, saved, values);
+            reshadeLive.add(new ReshadeLiveEffect(effect.name, entry.enabled, effect.params, values));
         }
     }
 
-    // Reflect the given effect's uniforms and (re)seed reshadeParamValues. savedJson null -> .fx defaults.
-    private void seedReshadeParams(String effectName, String savedJson) {
-        ReshadeManager.ReshadeEffect eff =
-                (effectName == null || effectName.trim().isEmpty()) ? null : ReshadeManager.findEffect(this, effectName);
-        reshadeParamDefs = (eff != null) ? eff.params : new java.util.ArrayList<>();
-        org.json.JSONObject saved = null;
-        if (savedJson != null && !savedJson.trim().isEmpty()) {
-            try { saved = new org.json.JSONObject(savedJson); } catch (Exception ignored) {}
+    // Immutable snapshot of the working loadout for the drawer state (withReshadeState).
+    private java.util.ArrayList<ReshadeLoadoutItem> buildReshadeItems() {
+        java.util.ArrayList<ReshadeLoadoutItem> items = new java.util.ArrayList<>();
+        for (ReshadeLiveEffect e : reshadeLive) {
+            items.add(new ReshadeLoadoutItem(e.name, e.enabled, e.defs, new java.util.LinkedHashMap<>(e.values)));
         }
-        reshadeParamValues.clear();
-        for (ReshadeManager.ReshadeParam p : reshadeParamDefs) ReshadeManager.seedValues(p, saved, reshadeParamValues);
+        return items;
     }
 
-    // Serialize the current live param map to JSON in the shared seedValues key scheme (or null when empty).
-    private String reshadeParamsJson() {
-        if (reshadeParamValues.isEmpty()) return null;
-        org.json.JSONObject obj = new org.json.JSONObject();
-        try {
-            for (java.util.Map.Entry<String, Float> e : reshadeParamValues.entrySet()) obj.put(e.getKey(), e.getValue().doubleValue());
-        } catch (Exception ignored) {}
-        return obj.length() == 0 ? null : obj.toString();
-    }
-
-    // Rewrite the running prefix's vkBasalt.conf so the patched libvkbasalt.so applies the change on its
-    // next frame. [restage] re-copies the effect files (only needed on a live effect SWITCH). Swallowed.
-    private void applyReshadeLive(boolean restage) {
+    // Persist the current working loadout (per-effect enabled + values + mode + master) to the launch
+    // source, then rewrite the merged conf (mtime bump -> the patched libvkbasalt hot-reloads the enable
+    // gates + values WITHOUT a recompile). The loadout membership is fixed at launch, so live edits only
+    // flip enable flags / tune uniforms — restage=false. Writes to the shortcut when it holds its own
+    // settings, else the container (the same entity resolveReshade reads next launch). Mid-session we
+    // must NOT flip use_container_defaults, so a defaults-following shortcut persists to the container.
+    // Fully swallowed.
+    private void applyReshadeLive() {
         try {
             if (imageFs == null) return;
-            ReshadeConfigWriter.writeLiveConfig(this, imageFs, reshadeEffectName, reshadeParamsJson(), reshadeEnabled, restage);
-        } catch (Exception e) {
-            Log.e("XServerDisplayActivity", "applyReshadeLive failed (ignored)", e);
-        }
-    }
+            java.util.ArrayList<com.winlator.cmod.runtime.reshade.ReshadeLoadout.Entry> entries = new java.util.ArrayList<>();
+            org.json.JSONObject nestedParams = new org.json.JSONObject();
+            for (ReshadeLiveEffect e : reshadeLive) {
+                entries.add(new com.winlator.cmod.runtime.reshade.ReshadeLoadout.Entry(e.name, e.enabled));
+                if (!e.values.isEmpty()) {
+                    org.json.JSONObject eff = new org.json.JSONObject();
+                    for (java.util.Map.Entry<String, Float> v : e.values.entrySet()) eff.put(v.getKey(), v.getValue().doubleValue());
+                    nestedParams.put(e.name, eff);
+                }
+            }
+            String loadoutJson = com.winlator.cmod.runtime.reshade.ReshadeLoadout.serialize(entries);
+            String paramsJson = nestedParams.length() == 0 ? null : nestedParams.toString();
+            String firstEffect = entries.isEmpty() ? null : entries.get(0).name; // legacy coherence
 
-    // Persist the current in-game ReShade selection/params back to the launch source so they survive a
-    // relaunch. Writes to the shortcut when it holds its own overrides, else to the container — the same
-    // entity Shortcut.getSettingExtra reads from at launch. Mid-session we must NOT flip
-    // use_container_defaults (the settings dialog only does that safely by re-saving every setting in one
-    // pass; here it would freeze the rest to their current values), so a defaults-following shortcut
-    // persists to the container instead. There's no separate "enabled" field in the saved model, so a
-    // disabled layer / "None" selection persists as a cleared effect (inherit / off). Fully swallowed.
-    private void persistReshadeSelection() {
-        try {
-            boolean on = reshadeEnabled
-                    && reshadeSelectedIndex >= 1
-                    && reshadeSelectedIndex < reshadeEffectNames.size();
-            String effect = on ? reshadeEffectNames.get(reshadeSelectedIndex) : null;
-            String params = on ? reshadeParamsJson() : null;
             if (shortcut != null && !shortcut.usesContainerDefaults()) {
-                shortcut.putExtra(ReshadeConfigWriter.EXTRA_EFFECT, effect); // null -> remove -> inherit container
-                shortcut.putExtra(ReshadeConfigWriter.EXTRA_PARAMS, params);
+                shortcut.putExtra(ReshadeConfigWriter.EXTRA_LOADOUT, entries.isEmpty() ? null : loadoutJson);
+                shortcut.putExtra(ReshadeConfigWriter.EXTRA_MODE, reshadeMode);
+                shortcut.putExtra(ReshadeConfigWriter.EXTRA_PARAMS, paramsJson);
+                shortcut.putExtra(ReshadeConfigWriter.EXTRA_EFFECT, firstEffect);
+                shortcut.putExtra(ReshadeConfigWriter.EXTRA_MASTER, reshadeMasterEnabled ? null : "0");
                 shortcut.saveData();
             } else if (container != null) {
-                container.putExtra(ReshadeConfigWriter.EXTRA_EFFECT, effect);
-                container.putExtra(ReshadeConfigWriter.EXTRA_PARAMS, params);
+                container.putExtra(ReshadeConfigWriter.EXTRA_LOADOUT, entries.isEmpty() ? null : loadoutJson);
+                container.putExtra(ReshadeConfigWriter.EXTRA_MODE, reshadeMode);
+                container.putExtra(ReshadeConfigWriter.EXTRA_PARAMS, paramsJson);
+                container.putExtra(ReshadeConfigWriter.EXTRA_EFFECT, firstEffect);
+                container.putExtra(ReshadeConfigWriter.EXTRA_MASTER, reshadeMasterEnabled ? "1" : "0");
                 container.saveData();
             }
+
+            // masterEnabled -> enableOnLaunch: the drawer master switch off writes enableOnLaunch=False
+            // (whole-chain passthrough); per-effect flags ride each <ei>_enabled gate.
+            ReshadeConfigWriter.writeMergedConfig(this, imageFs, entries, paramsJson, paramsJson != null,
+                    firstEffect, reshadeMasterEnabled, false);
         } catch (Exception e) {
-            Log.e("XServerDisplayActivity", "persistReshadeSelection failed (ignored)", e);
+            Log.e("XServerDisplayActivity", "applyReshadeLive failed (ignored)", e);
         }
     }
 
@@ -4183,15 +4247,13 @@ public class XServerDisplayActivity extends FixedFontScaleAppCompatActivity {
             }
         }
 
-        // ReShade tab — present only when the layer was enabled at launch (Vulkan wrapper + effect).
+        // ReShade tab — present only when the layer was armed at launch (Vulkan wrapper + loadout).
         if (reshadeSessionAvailable) {
             state = XServerDrawerMenuKt.withReshadeState(
                     state,
-                    reshadeEnabled,
-                    reshadeEffectNames,
-                    reshadeSelectedIndex,
-                    reshadeParamDefs,
-                    new java.util.LinkedHashMap<>(reshadeParamValues),
+                    reshadeMasterEnabled,
+                    reshadeMode,
+                    buildReshadeItems(),
                     getString(R.string.reshade_section_title));
         }
 
@@ -4654,46 +4716,56 @@ public class XServerDisplayActivity extends FixedFontScaleAppCompatActivity {
                     }
 
                     @Override
-                    public void onReshadeEnabledChanged(boolean enabled) {
-                        reshadeEnabled = enabled;
-                        applyReshadeLive(false);
-                        persistReshadeSelection();
+                    public void onReshadeMasterEnabledChanged(boolean enabled) {
+                        // Whole-chain passthrough on/off. The compiled loadout is untouched; only
+                        // enableOnLaunch flips (live via the conf mtime watch).
+                        reshadeMasterEnabled = enabled;
+                        applyReshadeLive();
                         renderDrawerMenu();
                     }
 
                     @Override
-                    public void onReshadeEffectSelected(int index) {
-                        reshadeSelectedIndex = Math.max(0, Math.min(index, reshadeEffectNames.size() - 1));
-                        if (reshadeSelectedIndex <= 0) {
-                            // "None": disable the layer live, drop the param model.
-                            reshadeEnabled = false;
-                            reshadeEffectName = "";
-                            reshadeParamDefs = new java.util.ArrayList<>();
-                            reshadeParamValues.clear();
-                            applyReshadeLive(false);
+                    public void onReshadeEffectEnabledChanged(int index, boolean enabled) {
+                        if (index < 0 || index >= reshadeLive.size()) return;
+                        if (com.winlator.cmod.runtime.reshade.ReshadeLoadout.MODE_SOLO.equals(reshadeMode) && enabled) {
+                            // Solo: activating one bypasses the rest (live switch — no recompile).
+                            for (int i = 0; i < reshadeLive.size(); i++) reshadeLive.get(i).enabled = (i == index);
                         } else {
-                            reshadeEffectName = reshadeEffectNames.get(reshadeSelectedIndex);
-                            reshadeEnabled = true;
-                            seedReshadeParams(reshadeEffectName, null); // switched effect -> .fx defaults
-                            applyReshadeLive(true);                     // stage the newly selected effect
+                            reshadeLive.get(index).enabled = enabled;
                         }
-                        persistReshadeSelection();
+                        applyReshadeLive();
                         renderDrawerMenu();
                     }
 
                     @Override
-                    public void onReshadeParamChanged(String key, float value) {
-                        reshadeParamValues.put(key, value);
-                        applyReshadeLive(false);
-                        persistReshadeSelection();
+                    public void onReshadeModeChanged(String mode) {
+                        reshadeMode = com.winlator.cmod.runtime.reshade.ReshadeLoadout.normalizeMode(mode);
+                        if (com.winlator.cmod.runtime.reshade.ReshadeLoadout.MODE_SOLO.equals(reshadeMode)) {
+                            // Collapse to a single active effect (keep the first enabled one).
+                            boolean seen = false;
+                            for (ReshadeLiveEffect e : reshadeLive) {
+                                if (e.enabled && !seen) seen = true; else e.enabled = false;
+                            }
+                        }
+                        applyReshadeLive();
                         renderDrawerMenu();
                     }
 
                     @Override
-                    public void onReshadeReset() {
-                        seedReshadeParams(reshadeEffectName, null); // back to .fx defaults
-                        applyReshadeLive(false);
-                        persistReshadeSelection();
+                    public void onReshadeParamChanged(int index, String key, float value) {
+                        if (index < 0 || index >= reshadeLive.size()) return;
+                        reshadeLive.get(index).values.put(key, value);
+                        applyReshadeLive();
+                        renderDrawerMenu();
+                    }
+
+                    @Override
+                    public void onReshadeReset(int index) {
+                        if (index < 0 || index >= reshadeLive.size()) return;
+                        ReshadeLiveEffect e = reshadeLive.get(index);
+                        e.values.clear();
+                        for (ReshadeManager.ReshadeParam p : e.defs) ReshadeManager.seedValues(p, null, e.values);
+                        applyReshadeLive();
                         renderDrawerMenu();
                     }
 

@@ -10,7 +10,9 @@ import com.winlator.cmod.shared.io.FileUtils;
 import org.json.JSONObject;
 
 import java.io.File;
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 
@@ -36,10 +38,18 @@ import java.util.Map;
 public class ReshadeConfigWriter {
     private static final String TAG = "ReshadeConfigWriter";
 
-    // Persisted on the Container / Shortcut as a plain string extra: the selected effect's folder name
-    // ("" / absent = None). Parameter overrides (optional) live in a JSON string extra.
+    // Persisted on the Container / Shortcut as plain string extras.
+    //   EXTRA_LOADOUT  reshadeLoadout — JSON array [{"name":..,"enabled":..}, ..] (the ordered chain).
+    //   EXTRA_MODE     reshadeMode    — "solo" | "stack".
+    //   EXTRA_PARAMS   reshadeParams  — nested {"<effect>":{"<uniform>":v}} overrides (flat for legacy).
+    //   EXTRA_MASTER   reshadeMasterEnabled — "0" when the in-game master switch was turned off; else on.
+    //   EXTRA_EFFECT   reshadeEffect  — LEGACY single-effect folder name; still read for back-compat and
+    //                                   kept roughly coherent (= first loadout effect) on save.
     public static final String EXTRA_EFFECT = "reshadeEffect";
     public static final String EXTRA_PARAMS = "reshadeParams";
+    public static final String EXTRA_LOADOUT = "reshadeLoadout";
+    public static final String EXTRA_MODE = "reshadeMode";
+    public static final String EXTRA_MASTER = "reshadeMasterEnabled";
 
     // vkBasalt applies to Vulkan-backed titles only. dxvk covers D3D9/10/11; vkd3d covers D3D12.
     public static boolean supportedFor(String dxwrapper) {
@@ -48,6 +58,9 @@ public class ReshadeConfigWriter {
         return w.contains("dxvk") || w.contains("vkd3d") || w.contains("d8vk");
     }
 
+    // LEGACY single-effect launch path — SUPERSEDED by applyLoadout()/writeMergedConfig() below, which
+    // the activity now uses for both launch and live. Retained (no callers) only so an external caller of
+    // the old single-effect API still compiles; safe to delete once none remain.
     // Writes the conf + effect files and injects env. Returns true when a ReShade effect was applied
     // (env mutated), false otherwise (no env change — caller's launch is untouched).
     public static boolean apply(Context context, ImageFs imageFs, String effectName,
@@ -99,6 +112,136 @@ public class ReshadeConfigWriter {
     // patched libvkbasalt.so watches for mtime changes. Exposed so the in-game live pane rewrites it.
     public static File confFile(ImageFs imageFs) {
         return new File(new File(imageFs.home_path, ".config/vkBasalt"), "vkBasalt.conf");
+    }
+
+    // ── Multi-effect loadout ─────────────────────────────────────────────────────────────────────
+    // A loadout compiles EVERY listed effect into the vkBasalt chain up front (effects = e1:e2:..); the
+    // per-effect `<ei>_enabled = 0|1` flag decides which of them present. The patched libvkbasalt.so
+    // watches this conf's mtime and re-reads enableOnLaunch (whole-chain passthrough) + each `_enabled`
+    // flag + the uniform values WITHOUT recompiling, so the in-game drawer flips effects on/off (solo
+    // switch / stack layering) LIVE. This is the fix for the single-effect drawer's failed live switch:
+    // an effect can only be toggled live if it was compiled at launch.
+
+    // Launch-time entry point. Stages every loadout effect, writes the merged conf, and sets the enabling
+    // env. Returns true when the layer was armed (env mutated), false otherwise (launch untouched).
+    public static boolean applyLoadout(Context context, ImageFs imageFs, List<ReshadeLoadout.Entry> loadout,
+                                       String paramsJson, boolean nested, String legacyEffect,
+                                       boolean masterEnabled, boolean vulkanWrapper, EnvVars envVars) {
+        if (!vulkanWrapper) return false;
+        if (loadout == null || loadout.isEmpty()) return false;
+
+        // Respect a user override: if custom env / launch options already set ENABLE_VKBASALT, leave the
+        // whole ReShade env untouched (user drives vkBasalt by hand).
+        if (envVars.has("ENABLE_VKBASALT")) {
+            Log.i(TAG, "ENABLE_VKBASALT already set by user env; leaving ReShade loadout untouched");
+            return false;
+        }
+
+        if (!writeMergedConfig(context, imageFs, loadout, paramsJson, nested, legacyEffect, masterEnabled, true)) {
+            return false; // no effect could be staged (all missing) -> nothing to arm
+        }
+
+        File conf = confFile(imageFs);
+        envVars.put("ENABLE_VKBASALT", "1");
+        envVars.put("VKBASALT_CONFIG_FILE", conf.getAbsolutePath());
+        Log.i(TAG, "ReShade loadout (" + loadout.size() + " effect(s)) -> " + conf.getAbsolutePath());
+        return true;
+    }
+
+    // Write the merged vkBasalt.conf for a loadout. Shared by the launch path (restage=true, re-copies
+    // each effect's drop-in folder) and the in-game live path (restage=false, folders already staged —
+    // rewrite + mtime bump only). Always bumps the mtime so an identical-bytes rewrite still trips the
+    // layer's watcher. Returns true when at least one effect was staged into the chain. Fully swallowed.
+    public static boolean writeMergedConfig(Context context, ImageFs imageFs, List<ReshadeLoadout.Entry> loadout,
+                                            String paramsJson, boolean nested, String legacyEffect,
+                                            boolean masterEnabled, boolean restage) {
+        try {
+            if (context == null || imageFs == null || loadout == null) return false;
+            File vkBasaltDir = new File(imageFs.home_path, ".config/vkBasalt");
+            if (!vkBasaltDir.isDirectory() && !vkBasaltDir.mkdirs()) return false;
+            File effectsRoot = new File(vkBasaltDir, "effects");
+
+            StringBuilder chain = new StringBuilder();       // e1:e2:...:en
+            StringBuilder effectLines = new StringBuilder();  // per-effect: <ei> = fx + uniforms + _enabled
+            List<String> stagedDirs = new ArrayList<>();
+            int idx = 0;
+
+            for (ReshadeLoadout.Entry entry : loadout) {
+                // Defensive hard cap: never compile more than MAX_EFFECTS even if a bad save carries more.
+                if (idx >= ReshadeLoadout.MAX_EFFECTS) {
+                    Log.w(TAG, "ReShade loadout exceeds " + ReshadeLoadout.MAX_EFFECTS
+                            + " effects; truncating the rest");
+                    break;
+                }
+                ReshadeManager.ReshadeEffect effect = ReshadeManager.findEffect(context, entry.name);
+                if (effect == null) {
+                    // Skip-and-continue: one missing effect must not kill the rest of the chain.
+                    Log.w(TAG, "ReShade loadout effect not found, skipping: " + entry.name);
+                    continue;
+                }
+
+                String effectKey = sanitizeKey(effect.name);
+                if (effectKey.equals("reshade")) effectKey = "reshade" + idx; // keep keys distinct
+
+                File destDir = new File(effectsRoot, effect.name);
+                File destFx = new File(destDir, effect.fxFile.getName());
+                if (restage || !destFx.isFile()) {
+                    FileUtils.clear(destDir);
+                    if (!copyTree(effect.dir, destDir)) {
+                        Log.e(TAG, "Failed to stage ReShade effect folder: " + effect.dir);
+                        continue;
+                    }
+                }
+                stagedDirs.add(destDir.getAbsolutePath()); // host-absolute
+
+                if (chain.length() > 0) chain.append(":");
+                chain.append(effectKey);
+                effectLines.append(effectKey).append(" = ").append(destFx.getAbsolutePath()).append("\n");
+
+                // Per-uniform overrides for THIS effect (nested {"<effect>":{...}}, or migrated flat
+                // legacy), layered over the .fx defaults, emitted in the "<effectKey>_<uniform>" scheme.
+                JSONObject paramJson =
+                        ReshadeLoadout.paramsForEffect(paramsJson, effect.name, nested, legacyEffect);
+                Map<String, Float> values = new LinkedHashMap<>();
+                for (ReshadeManager.ReshadeParam p : effect.params) ReshadeManager.seedValues(p, paramJson, values);
+                for (ReshadeManager.ReshadeParam p : effect.params) appendUniformLines(effectLines, effectKey, p, values);
+
+                // Per-effect enable gate the patched layer reads (1 = active, 0 = bypassed).
+                effectLines.append(effectKey).append("_enabled = ").append(entry.enabled ? "1" : "0").append("\n");
+                idx++;
+            }
+
+            if (chain.length() == 0) {
+                Log.w(TAG, "No ReShade loadout effects could be staged; skipping conf");
+                return false;
+            }
+
+            StringBuilder sb = new StringBuilder();
+            sb.append("# Generated by WinNative — ReShade loadout (do not edit; regenerated on each change)\n");
+            sb.append("effects = ").append(chain).append("\n");
+            sb.append(effectLines);
+
+            // Texture/include search paths: colon-join every staged effect dir (vkBasalt splits these on
+            // ':' the same way it splits the effects list — the verified way to resolve multiple effects;
+            // each effect keeps its OWN staged dir). A single-effect loadout collapses to one path.
+            String pathList = android.text.TextUtils.join(":", stagedDirs);
+            sb.append("reshadeTexturePath = ").append(pathList).append("\n");
+            sb.append("reshadeIncludePath = ").append(pathList).append("\n");
+            sb.append("depthCapture = off\n");
+            sb.append("toggleKey = Home\n");
+            sb.append("enableOnLaunch = ").append(masterEnabled ? "True" : "False").append("\n");
+
+            File conf = new File(vkBasaltDir, "vkBasalt.conf");
+            boolean ok = FileUtils.writeString(conf, sb.toString());
+            if (ok) {
+                conf.setLastModified(System.currentTimeMillis());
+                Log.d(TAG, "Wrote ReShade loadout conf (" + chain + ") -> " + conf.getAbsolutePath());
+            }
+            return ok;
+        } catch (Exception e) {
+            Log.e(TAG, "writeMergedConfig failed (ignored)", e);
+            return false;
+        }
     }
 
     // Live in-game rewrite of the running prefix's vkBasalt.conf so the PATCHED libvkbasalt.so picks up

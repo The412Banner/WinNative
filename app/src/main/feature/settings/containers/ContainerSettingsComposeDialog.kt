@@ -35,8 +35,6 @@ import com.winlator.cmod.feature.library.GameSettingsNav
 import com.winlator.cmod.feature.library.GameSettingsStateHolder
 import com.winlator.cmod.feature.library.WinComponentItem
 import com.winlator.cmod.feature.library.parseEnvVarItems
-import com.winlator.cmod.feature.library.reshadeParamsToJson
-import com.winlator.cmod.feature.library.seedReshadeParams
 import com.winlator.cmod.runtime.compat.box64.Box64Preset
 import com.winlator.cmod.runtime.compat.box64.Box64PresetManager
 import com.winlator.cmod.runtime.container.Container
@@ -545,25 +543,18 @@ class ContainerSettingsComposeDialog @JvmOverloads constructor(
         state.surfaceEffectEntries.value = surfaceEffectArr
         state.selectedSurfaceEffect.intValue = if (c?.getExtra("swapRB", "0") == "1") 1 else 0
 
-        // ReShade drop-in effect (container default; persisted as the effect's folder name, "None" = 0)
-        val reshadeEntries = ArrayList<String>()
-        reshadeEntries.add(context.getString(R.string.reshade_none))
-        reshadeEntries.addAll(com.winlator.cmod.runtime.reshade.ReshadeManager.scanEffectNames(context))
-        state.reshadeEffectEntries.value = reshadeEntries
-        val savedReshade = c?.getExtra(
-            com.winlator.cmod.runtime.reshade.ReshadeConfigWriter.EXTRA_EFFECT, "") ?: ""
-        val reshadeIdx = reshadeEntries.indexOfFirst { it.equals(savedReshade, ignoreCase = true) }
-        state.selectedReshadeEffect.intValue = if (reshadeIdx >= 0) reshadeIdx else 0
-
-        // Seed the per-effect param model from the saved reshadeParams JSON + .fx defaults so the
-        // pre-launch controls open on the persisted values (launch path applies the same key scheme).
-        val savedReshadeParams = c?.getExtra(
-            com.winlator.cmod.runtime.reshade.ReshadeConfigWriter.EXTRA_PARAMS, "") ?: ""
-        val loadedReshadeEffect = if (reshadeIdx >= 1) reshadeEntries[reshadeIdx] else ""
-        state.reshadeSavedEffect.value = loadedReshadeEffect
-        state.reshadeSavedParamsJson.value = savedReshadeParams
-        seedReshadeParams(
-            context, state, loadedReshadeEffect.ifEmpty { null }, savedReshadeParams)
+        // ReShade drop-in LOADOUT (container default). Scan the effect pool + (re)load the ordered
+        // multi-effect model from the reshadeLoadout array + mode + nested params, migrating a legacy
+        // single reshadeEffect/flat reshadeParams transparently (ReshadeLoadout.parse).
+        val reshadeEffects = com.winlator.cmod.runtime.reshade.ReshadeManager.scanEffects(context)
+        state.reshadeEffects.value = reshadeEffects
+        state.reshadeLoadout.init(
+            reshadeEffects,
+            c?.getExtra(com.winlator.cmod.runtime.reshade.ReshadeConfigWriter.EXTRA_LOADOUT, null),
+            c?.getExtra(com.winlator.cmod.runtime.reshade.ReshadeConfigWriter.EXTRA_MODE, null),
+            c?.getExtra(com.winlator.cmod.runtime.reshade.ReshadeConfigWriter.EXTRA_PARAMS, null),
+            c?.getExtra(com.winlator.cmod.runtime.reshade.ReshadeConfigWriter.EXTRA_EFFECT, null),
+        )
 
         val audioDriverArr = context.resources.getStringArray(R.array.audio_driver_entries).toList()
         state.audioDriverEntries.value = audioDriverArr
@@ -833,16 +824,19 @@ class ContainerSettingsComposeDialog @JvmOverloads constructor(
             c.putExtra("swapRB", if (state.selectedSurfaceEffect.intValue == 1) "1" else "0")
             c.putExtra("refreshRate", getRefreshRateFromState())
             run {
-                val reshadeEntries = state.reshadeEffectEntries.value
-                val idx = state.selectedReshadeEffect.intValue
-                val effectName = if (idx in 1 until reshadeEntries.size) reshadeEntries[idx] else null
+                // ReShade loadout: the ordered array + mode + nested per-effect params. reshadeEffect is
+                // kept coherent (= first effect) for any legacy reader; all null when the loadout is empty.
+                val loadoutJson = state.reshadeLoadout.loadoutJsonOrNull()
+                c.putExtra(com.winlator.cmod.runtime.reshade.ReshadeConfigWriter.EXTRA_LOADOUT, loadoutJson)
                 c.putExtra(
-                    com.winlator.cmod.runtime.reshade.ReshadeConfigWriter.EXTRA_EFFECT, effectName)
-                // Per-uniform overrides: serialize to the reshadeParams JSON extra (null when None /
-                // no params so the launch path falls back to .fx defaults).
-                val reshadeParams = if (effectName == null) null else reshadeParamsToJson(state)
+                    com.winlator.cmod.runtime.reshade.ReshadeConfigWriter.EXTRA_MODE,
+                    if (loadoutJson == null) null else state.reshadeLoadout.mode)
                 c.putExtra(
-                    com.winlator.cmod.runtime.reshade.ReshadeConfigWriter.EXTRA_PARAMS, reshadeParams)
+                    com.winlator.cmod.runtime.reshade.ReshadeConfigWriter.EXTRA_PARAMS,
+                    if (loadoutJson == null) null else state.reshadeLoadout.paramsJsonOrNull())
+                c.putExtra(
+                    com.winlator.cmod.runtime.reshade.ReshadeConfigWriter.EXTRA_EFFECT,
+                    if (loadoutJson == null) null else state.reshadeLoadout.firstEffectName())
             }
             c.setAudioDriver(audioDriver)
             c.setEmulator(emulator)

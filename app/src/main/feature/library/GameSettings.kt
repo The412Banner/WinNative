@@ -45,6 +45,7 @@ import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.automirrored.outlined.HelpOutline
 import androidx.compose.material.icons.automirrored.outlined.OpenInNew
 import androidx.compose.material.icons.outlined.Code
@@ -67,6 +68,7 @@ import androidx.compose.material.icons.outlined.Search
 import androidx.compose.material.icons.outlined.Download
 import androidx.compose.material.icons.outlined.Upload
 import androidx.compose.material3.Checkbox
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CheckboxDefaults
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -77,6 +79,7 @@ import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.SliderState
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
@@ -90,7 +93,6 @@ import androidx.compose.runtime.Stable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.key
-import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -132,6 +134,7 @@ import com.winlator.cmod.R
 import com.winlator.cmod.runtime.reshade.ReshadeCatalog
 import com.winlator.cmod.runtime.reshade.ReshadeCatalogEntry
 import com.winlator.cmod.runtime.reshade.ReshadeDownloader
+import com.winlator.cmod.runtime.reshade.ReshadeLoadout
 import com.winlator.cmod.runtime.reshade.ReshadeManager
 import com.winlator.cmod.runtime.wine.WineThemeManager
 import kotlinx.coroutines.Dispatchers
@@ -406,22 +409,14 @@ class GameSettingsStateHolder {
     val sgsrUpscaleMode = mutableIntStateOf(1)
     val sgsrSharpness = mutableIntStateOf(100)
 
-    // ReShade drop-in effect. reshadeEffectEntries[0] == "None"; the selected index maps to the
-    // effect's drop-in folder name (persisted as the "reshadeEffect" extra). Populated at load from
-    // ReshadeManager.scanEffectNames().
-    val reshadeEffectEntries = mutableStateOf(listOf("None"))
-    val selectedReshadeEffect = mutableIntStateOf(0)
-
-    // Per-effect ReShade parameter overrides (persisted as the "reshadeParams" JSON extra). Current
-    // values are keyed by the shared ReshadeManager.seedValues scheme: scalar/bool/combo -> "<name>",
-    // color -> "<name>_<component>". reshadeParamDefs is the reflected uniform list for the currently
-    // selected effect (empty for "None"); both are seeded at load from the saved JSON + .fx defaults
-    // and re-seeded when the effect selection changes. reshadeSavedEffect/reshadeSavedParamsJson keep
-    // the as-loaded values so a live switch back to the loaded effect restores its saved overrides.
-    val reshadeParamValues = mutableStateMapOf<String, Float>()
-    val reshadeParamDefs = mutableStateOf<List<ReshadeManager.ReshadeParam>>(emptyList())
-    val reshadeSavedEffect = mutableStateOf("")
-    val reshadeSavedParamsJson = mutableStateOf("")
+    // ReShade drop-in LOADOUT. reshadeEffects is the scanned drop-in pool (name + reflected params),
+    // used by the catalog picker and for param reflection. reshadeLoadout is the ordered, per-effect
+    // multi-effect model the editor mutates (chain order, per-effect enabled, solo/stack mode, per-effect
+    // uniform values) — serialized to the reshadeLoadout array + nested reshadeParams object on save, and
+    // migrating legacy single-effect saves via ReshadeLoadout. Both editors (container + shortcut) share
+    // this; the launch path (ReshadeConfigWriter) compiles every enabled effect into the vkBasalt chain.
+    val reshadeEffects = mutableStateOf<List<ReshadeManager.ReshadeEffect>>(emptyList())
+    val reshadeLoadout = ReshadeLoadoutState()
 
     // Graphics Driver Configuration (inline card)
     val gfxConfigExpanded = mutableStateOf(false)
@@ -2196,26 +2191,8 @@ private fun WineD3DConfigCard(state: GameSettingsStateHolder) {
 
 @Composable
 private fun ReshadeSection(state: GameSettingsStateHolder) {
-    val context = LocalContext.current
-    val entries = state.reshadeEffectEntries.value
-    val hasEffects = entries.size > 1  // entries[0] is always "None"
+    val loadout = state.reshadeLoadout
     var showCatalog by remember { mutableStateOf(false) }
-
-    // Re-seed the param model whenever the selected effect changes. Keyed on the effect NAME so
-    // in-place control edits (which never change the selected name) are not clobbered. Switching back
-    // to the as-loaded effect restores its saved overrides; any other effect seeds from .fx defaults.
-    val selectedIdx = state.selectedReshadeEffect.intValue
-    val selectedName = entries.getOrNull(selectedIdx)
-    LaunchedEffect(selectedName, selectedIdx) {
-        if (selectedName == null || selectedIdx < 1) {
-            state.reshadeParamDefs.value = emptyList()
-            state.reshadeParamValues.clear()
-        } else {
-            val useSaved = selectedName.equals(state.reshadeSavedEffect.value, ignoreCase = true)
-            val savedJson = if (useSaved) state.reshadeSavedParamsJson.value else null
-            withContext(Dispatchers.IO) { seedReshadeParams(context, state, selectedName, savedJson) }
-        }
-    }
 
     SubsectionLabel(stringResource(R.string.reshade_section_title))
     Spacer(Modifier.height(8.dp))
@@ -2226,59 +2203,72 @@ private fun ReshadeSection(state: GameSettingsStateHolder) {
     Spacer(Modifier.height(SettingSectionGap))
 
     SettingGroup {
-        // Local-scan dropdown — unchanged: picks which already-installed effect is active for this
-        // game/container (persisted via the reshadeEffect extra).
-        SettingDropdown(
-            label = stringResource(R.string.reshade_effect_label),
-            entries = entries,
-            selectedIndex = state.selectedReshadeEffect.intValue
-                .coerceIn(0, (entries.size - 1).coerceAtLeast(0)),
-            onSelected = { state.selectedReshadeEffect.intValue = it }
-        )
-        if (!hasEffects) {
-            Spacer(Modifier.height(8.dp))
+        if (loadout.order.isEmpty()) {
             Text(
-                text = stringResource(R.string.reshade_empty_hint),
+                text = stringResource(R.string.reshade_loadout_empty),
                 color = TextSecondary
             )
+            Spacer(Modifier.height(SettingItemGap))
+        } else {
+            // One row per chosen effect (chain order = apply order): enable toggle, reorder, remove, and
+            // an expander to its typed uniform controls. Every effect here is compiled into the vkBasalt
+            // chain at launch; the in-game drawer then flips each one's live gate (solo switch / stack).
+            loadout.order.forEachIndexed { index, name ->
+                val effect = state.reshadeEffects.value.firstOrNull { it.name == name }
+                ReshadeEffectEditorRow(
+                    state = state,
+                    index = index,
+                    name = name,
+                    params = effect?.params ?: emptyList(),
+                    isFirst = index == 0,
+                    isLast = index == loadout.order.lastIndex,
+                )
+                Spacer(Modifier.height(SettingItemGap))
+            }
         }
 
-        // Browse & download affordance: opens the online catalog picker. New downloads land in the
-        // ReShade/ drop-in folder and are rescanned into the dropdown above.
-        Spacer(Modifier.height(SettingItemGap))
+        // Add / browse affordance: opens the online catalog picker (multi-select). New downloads land in
+        // the ReShade/ drop-in folder and are added to the loadout.
+        val full = loadout.isFull()
         Row(
             modifier = Modifier
                 .fillMaxWidth()
                 .clip(RoundedCornerShape(SettingFieldCorner))
-                .paneNavItem(
-                    cornerRadius = SettingFieldCorner,
-                    onActivate = { showCatalog = true },
-                    highlightColor = NavHighlight,
+                .then(
+                    if (full) Modifier
+                    else Modifier
+                        .paneNavItem(
+                            cornerRadius = SettingFieldCorner,
+                            onActivate = { showCatalog = true },
+                            highlightColor = NavHighlight,
+                        )
+                        .clickable { showCatalog = true }
                 )
-                .clickable { showCatalog = true }
                 .padding(horizontal = SettingFieldHorizontalPadding, vertical = SettingFieldVerticalPadding),
             verticalAlignment = Alignment.CenterVertically
         ) {
             Icon(
-                Icons.Outlined.Download,
+                Icons.Outlined.Add,
                 contentDescription = null,
-                tint = AccentBlue,
+                tint = if (full) TextSecondary else AccentBlue,
                 modifier = Modifier.size(SettingIconSize)
             )
             Spacer(Modifier.width(8.dp))
             Text(
-                stringResource(R.string.reshade_browse),
-                color = AccentBlue,
+                stringResource(if (full) R.string.reshade_loadout_full else R.string.reshade_loadout_add),
+                color = if (full) TextSecondary else AccentBlue,
                 fontSize = SettingValueSize,
                 fontWeight = FontWeight.Medium
             )
         }
     }
 
-    // Typed pre-launch controls for the selected effect's reflected uniforms. Written to the
-    // reshadeParams extra on save; the launch path (ReshadeConfigWriter) applies them.
-    if (selectedIdx >= 1) {
-        ReshadeParamControls(state)
+    // Solo / Stack mode — how the compiled loadout behaves in-game (one-at-a-time switch vs layered).
+    if (loadout.order.isNotEmpty()) {
+        Spacer(Modifier.height(SettingSectionGap))
+        SettingGroup {
+            ReshadeModeSelector(loadout.mode) { loadout.changeMode(it) }
+        }
     }
 
     if (showCatalog) {
@@ -2286,45 +2276,172 @@ private fun ReshadeSection(state: GameSettingsStateHolder) {
     }
 }
 
-// Reflect the selected effect's uniforms and seed the value map (saved JSON wins over .fx defaults).
-// effectName null/blank -> clears the model. Reads the effect's .fx off the caller's thread; callers
-// on the main thread do this synchronously (a small local read, same as scanEffectNames), the live
-// selection-change path wraps it in Dispatchers.IO.
-internal fun seedReshadeParams(
-    context: android.content.Context,
+// One effect's row in the pre-launch loadout editor: an enable Switch, the name (tap to expand), reorder
+// up/down, a remove control, and — when expanded — the effect's typed uniform controls + a per-effect
+// Reset. In solo mode enabling one bypasses the rest (ReshadeLoadoutState handles the exclusivity).
+@Composable
+private fun ReshadeEffectEditorRow(
     state: GameSettingsStateHolder,
-    effectName: String?,
-    savedJson: String?
+    index: Int,
+    name: String,
+    params: List<ReshadeManager.ReshadeParam>,
+    isFirst: Boolean,
+    isLast: Boolean,
 ) {
-    val defs: List<ReshadeManager.ReshadeParam> =
-        if (effectName.isNullOrBlank()) emptyList()
-        else ReshadeManager.findEffect(context, effectName)?.params ?: emptyList()
-    val saved: JSONObject? = try {
-        if (!savedJson.isNullOrBlank()) JSONObject(savedJson) else null
-    } catch (e: Exception) { null }
-    val values = LinkedHashMap<String, Float>()
-    for (p in defs) ReshadeManager.seedValues(p, saved, values)
-    state.reshadeParamDefs.value = defs
-    state.reshadeParamValues.clear()
-    state.reshadeParamValues.putAll(values)
+    val loadout = state.reshadeLoadout
+    val enabled = loadout.isEnabled(name)
+    var expanded by remember(name) { mutableStateOf(false) }
+
+    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
+        Switch(
+            checked = enabled,
+            onCheckedChange = { loadout.setEnabled(name, it) },
+        )
+        Spacer(Modifier.width(8.dp))
+        Text(
+            text = name,
+            color = TextPrimary,
+            fontSize = SettingLabelSize,
+            fontWeight = if (enabled) FontWeight.SemiBold else FontWeight.Normal,
+            modifier = Modifier
+                .weight(1f)
+                .clip(RoundedCornerShape(6.dp))
+                .paneNavItem(cornerRadius = 6.dp, onActivate = { expanded = !expanded }, highlightColor = NavHighlight, tapToSelect = true)
+                .clickable { expanded = !expanded }
+                .padding(vertical = 4.dp)
+        )
+        if (loadout.mode == ReshadeLoadout.MODE_SOLO && enabled) {
+            Text(
+                text = stringResource(R.string.reshade_effect_active),
+                color = AccentBlue,
+                fontSize = SettingLabelSize,
+                modifier = Modifier.padding(end = 6.dp)
+            )
+        }
+        ReshadeRowIcon(Icons.Outlined.KeyboardArrowUp, enabled = !isFirst) { loadout.move(index, index - 1) }
+        ReshadeRowIcon(Icons.Outlined.KeyboardArrowDown, enabled = !isLast) { loadout.move(index, index + 1) }
+        ReshadeRowIcon(Icons.Outlined.Close, enabled = true) { loadout.remove(name) }
+    }
+
+    if (expanded) {
+        if (params.isEmpty()) {
+            Text(
+                text = stringResource(R.string.reshade_drawer_no_params),
+                color = TextSecondary,
+                fontSize = SettingLabelSize,
+                modifier = Modifier.padding(start = 12.dp, top = 4.dp)
+            )
+        } else {
+            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(top = 4.dp)) {
+                Spacer(Modifier.weight(1f))
+                Text(
+                    text = stringResource(R.string.reshade_params_reset),
+                    color = AccentBlue,
+                    fontSize = SettingLabelSize,
+                    fontWeight = FontWeight.Medium,
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(6.dp))
+                        .paneNavItem(cornerRadius = 6.dp, onActivate = { resetReshadeEffectParams(loadout, name, params) }, highlightColor = NavHighlight, tapToSelect = true)
+                        .clickable { resetReshadeEffectParams(loadout, name, params) }
+                        .padding(horizontal = 8.dp, vertical = 4.dp)
+                )
+            }
+            for (p in params) {
+                Spacer(Modifier.height(SettingItemGap))
+                ReshadeEffectParamControl(loadout, name, p)
+            }
+        }
+    }
 }
 
-// Restore every param of the selected effect to its .fx default (re-seed with no saved overrides).
-private fun resetReshadeParams(state: GameSettingsStateHolder) {
-    val values = LinkedHashMap<String, Float>()
-    for (p in state.reshadeParamDefs.value) ReshadeManager.seedValues(p, null, values)
-    state.reshadeParamValues.clear()
-    state.reshadeParamValues.putAll(values)
+// Compact icon control for the reorder/remove affordances (paneNavItem so the controller can reach it).
+@Composable
+private fun ReshadeRowIcon(
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    enabled: Boolean,
+    onClick: () -> Unit,
+) {
+    Box(
+        modifier = Modifier
+            .size(30.dp)
+            .clip(RoundedCornerShape(6.dp))
+            .then(
+                if (!enabled) Modifier
+                else Modifier
+                    .paneNavItem(cornerRadius = 6.dp, onActivate = onClick, highlightColor = NavHighlight, tapToSelect = true)
+                    .clickable { onClick() }
+            ),
+        contentAlignment = Alignment.Center
+    ) {
+        Icon(
+            imageVector = icon,
+            contentDescription = null,
+            tint = if (enabled) TextSecondary else TextSecondary.copy(alpha = 0.3f),
+            modifier = Modifier.size(SettingIconSize)
+        )
+    }
 }
 
-// Serialize the current param value map to a JSON string in the shared seedValues key scheme, or null
-// when there is nothing to persist (None selected / no reflected params). Written to the reshadeParams
-// extra by both editors' save paths.
-internal fun reshadeParamsToJson(state: GameSettingsStateHolder): String? {
-    if (state.reshadeParamDefs.value.isEmpty() || state.reshadeParamValues.isEmpty()) return null
-    val obj = JSONObject()
-    for ((k, v) in state.reshadeParamValues) obj.put(k, v.toDouble())
-    return if (obj.length() == 0) null else obj.toString()
+// Solo / Stack pill selector for the pre-launch editor (mirrors the in-game pane's mode row).
+@Composable
+private fun ReshadeModeSelector(mode: String, onChange: (String) -> Unit) {
+    Column {
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            listOf(
+                ReshadeLoadout.MODE_SOLO to stringResource(R.string.reshade_mode_solo),
+                ReshadeLoadout.MODE_STACK to stringResource(R.string.reshade_mode_stack),
+            ).forEach { (value, label) ->
+                val selected = mode == value
+                Box(
+                    modifier = Modifier
+                        .weight(1f)
+                        .clip(RoundedCornerShape(8.dp))
+                        .background(if (selected) AccentBlue.copy(alpha = 0.16f) else Color.Transparent)
+                        .border(1.dp, if (selected) AccentBlue else CardBorder, RoundedCornerShape(8.dp))
+                        .paneNavItem(cornerRadius = 8.dp, onActivate = { onChange(value) }, highlightColor = NavHighlight, tapToSelect = true)
+                        .clickable { onChange(value) }
+                        .padding(vertical = 8.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(
+                        text = label,
+                        color = if (selected) AccentBlue else TextPrimary,
+                        fontSize = SettingLabelSize,
+                        fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal
+                    )
+                }
+            }
+        }
+        Spacer(Modifier.height(SettingTightGap))
+        Text(
+            text = if (mode == ReshadeLoadout.MODE_SOLO) stringResource(R.string.reshade_mode_solo_hint)
+            else stringResource(R.string.reshade_mode_stack_hint),
+            color = TextSecondary,
+            fontSize = SettingLabelSize
+        )
+    }
+}
+
+// Rescan the ReShade drop-in folder (after a download) and reconcile the loadout: refresh the effect
+// pool and re-seed any newly-reflected params, keeping the current selection + values. Call on the main
+// thread with an already-scanned list (do the disk scan off-thread).
+private fun rescanReshadeEffects(
+    state: GameSettingsStateHolder,
+    effects: List<ReshadeManager.ReshadeEffect>,
+) {
+    state.reshadeEffects.value = effects
+    state.reshadeLoadout.reconcile(effects)
+}
+
+// Restore one effect's params to its .fx defaults (re-seed with no saved overrides).
+private fun resetReshadeEffectParams(
+    loadout: ReshadeLoadoutState,
+    name: String,
+    params: List<ReshadeManager.ReshadeParam>,
+) {
+    val tmp = LinkedHashMap<String, Float>()
+    for (p in params) ReshadeManager.seedValues(p, null, tmp)
+    for ((k, v) in tmp) loadout.setParam(name, k, v)
 }
 
 private fun reshadeColorComponentLabel(c: Int, components: Int): String = when {
@@ -2335,99 +2452,70 @@ private fun reshadeColorComponentLabel(c: Int, components: Int): String = when {
     else -> (c + 1).toString()
 }
 
+// One reflected uniform for a loadout effect, rendered with the control type matching its ParamType.
+// Values are keyed per-effect in ReshadeLoadoutState ("<effect>::<uniform>"), so effects with the same
+// uniform name never collide.
 @Composable
-private fun ReshadeParamControls(state: GameSettingsStateHolder) {
-    val defs = state.reshadeParamDefs.value
-    if (defs.isEmpty()) return
-
-    Spacer(Modifier.height(SettingSectionGap))
-    SettingGroup {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Text(
-                text = stringResource(R.string.reshade_params_title),
-                color = TextSecondary,
-                fontSize = SettingSectionLabelSize,
-                fontWeight = FontWeight.SemiBold,
-                letterSpacing = 0.8.sp,
-                modifier = Modifier.weight(1f)
-            )
-            Text(
-                text = stringResource(R.string.reshade_params_reset),
-                color = AccentBlue,
-                fontSize = SettingLabelSize,
-                fontWeight = FontWeight.Medium,
-                modifier = Modifier
-                    .clip(RoundedCornerShape(6.dp))
-                    .paneNavItem(
-                        cornerRadius = 6.dp,
-                        onActivate = { resetReshadeParams(state) },
-                        highlightColor = NavHighlight,
-                        tapToSelect = true,
-                    )
-                    .clickable { resetReshadeParams(state) }
-                    .padding(horizontal = 8.dp, vertical = 4.dp)
+private fun ReshadeEffectParamControl(
+    loadout: ReshadeLoadoutState,
+    effect: String,
+    p: ReshadeManager.ReshadeParam,
+) {
+    when (p.type) {
+        ReshadeManager.ParamType.BOOL -> {
+            val v = loadout.paramValue(effect, p.name, p.defaultValue)
+            SettingCheckbox(
+                label = p.label,
+                checked = v != 0f,
+                onCheckedChange = { loadout.setParam(effect, p.name, if (it) 1f else 0f) }
             )
         }
-
-        for (p in defs) {
-            Spacer(Modifier.height(SettingItemGap))
-            when (p.type) {
-                ReshadeManager.ParamType.BOOL -> {
-                    val v = state.reshadeParamValues[p.name] ?: p.defaultValue
-                    SettingCheckbox(
-                        label = p.label,
-                        checked = v != 0f,
-                        onCheckedChange = { state.reshadeParamValues[p.name] = if (it) 1f else 0f }
-                    )
-                }
-                ReshadeManager.ParamType.COMBO -> {
-                    val options = p.options ?: emptyList()
-                    val v = (state.reshadeParamValues[p.name] ?: p.defaultValue).roundToInt()
-                    SettingDropdown(
-                        label = p.label,
-                        entries = options,
-                        selectedIndex = v.coerceIn(0, (options.size - 1).coerceAtLeast(0)),
-                        onSelected = { state.reshadeParamValues[p.name] = it.toFloat() }
-                    )
-                }
-                ReshadeManager.ParamType.COLOR -> ReshadeColorControl(state, p)
-                ReshadeManager.ParamType.INT -> {
-                    val v = state.reshadeParamValues[p.name] ?: p.defaultValue
-                    ReshadeFloatSlider(
-                        label = p.label,
-                        value = v,
-                        min = p.min,
-                        max = p.max,
-                        step = if (p.step > 0f) p.step else 1f,
-                        whole = true,
-                        onValueChange = { state.reshadeParamValues[p.name] = it }
-                    )
-                }
-                else -> { // FLOAT
-                    val v = state.reshadeParamValues[p.name] ?: p.defaultValue
-                    ReshadeFloatSlider(
-                        label = p.label,
-                        value = v,
-                        min = p.min,
-                        max = p.max,
-                        step = p.step,
-                        whole = false,
-                        onValueChange = { state.reshadeParamValues[p.name] = it }
-                    )
-                }
-            }
+        ReshadeManager.ParamType.COMBO -> {
+            val options = p.options ?: emptyList()
+            val v = loadout.paramValue(effect, p.name, p.defaultValue).roundToInt()
+            SettingDropdown(
+                label = p.label,
+                entries = options,
+                selectedIndex = v.coerceIn(0, (options.size - 1).coerceAtLeast(0)),
+                onSelected = { loadout.setParam(effect, p.name, it.toFloat()) }
+            )
         }
+        ReshadeManager.ParamType.COLOR -> ReshadeEffectColorControl(loadout, effect, p)
+        ReshadeManager.ParamType.INT ->
+            ReshadeFloatSlider(
+                label = p.label,
+                value = loadout.paramValue(effect, p.name, p.defaultValue),
+                min = p.min,
+                max = p.max,
+                step = if (p.step > 0f) p.step else 1f,
+                whole = true,
+                onValueChange = { loadout.setParam(effect, p.name, it) }
+            )
+        else -> // FLOAT
+            ReshadeFloatSlider(
+                label = p.label,
+                value = loadout.paramValue(effect, p.name, p.defaultValue),
+                min = p.min,
+                max = p.max,
+                step = p.step,
+                whole = false,
+                onValueChange = { loadout.setParam(effect, p.name, it) }
+            )
     }
 }
 
-// Color param rendered as a tappable swatch that expands to per-channel (R/G/B[/A]) sliders, instead
-// of always-visible channel sliders — cuts the clutter on color-grading effects (many float3 colors).
+// Color param (per-effect) rendered as a tappable swatch that expands to per-channel (R/G/B[/A]) sliders,
+// cutting the clutter on color-grading effects (many float3 colors).
 @Composable
-private fun ReshadeColorControl(state: GameSettingsStateHolder, p: ReshadeManager.ReshadeParam) {
-    val expanded = remember(p.name) { mutableStateOf(false) }
+private fun ReshadeEffectColorControl(
+    loadout: ReshadeLoadoutState,
+    effect: String,
+    p: ReshadeManager.ReshadeParam,
+) {
+    val expanded = remember(effect, p.name) { mutableStateOf(false) }
 
     fun comp(c: Int): Float =
-        state.reshadeParamValues[p.name + "_" + c] ?: (p.componentDefaults?.getOrNull(c) ?: 0f)
+        loadout.paramValue(effect, p.name + "_" + c, p.componentDefaults?.getOrNull(c) ?: 0f)
     val r = comp(0)
     val g = if (p.components > 1) comp(1) else r
     val b = if (p.components > 2) comp(2) else r
@@ -2473,12 +2561,12 @@ private fun ReshadeColorControl(state: GameSettingsStateHolder, p: ReshadeManage
             Spacer(Modifier.height(SettingTightGap))
             ReshadeFloatSlider(
                 label = reshadeColorComponentLabel(c, p.components),
-                value = state.reshadeParamValues[key] ?: (p.componentDefaults?.getOrNull(c) ?: 0f),
+                value = loadout.paramValue(effect, key, p.componentDefaults?.getOrNull(c) ?: 0f),
                 min = 0f,
                 max = 1f,
                 step = 0.01f,
                 whole = false,
-                onValueChange = { state.reshadeParamValues[key] = it }
+                onValueChange = { loadout.setParam(effect, key, it) }
             )
         }
     }
@@ -2565,27 +2653,6 @@ private fun ReshadeFloatSlider(
     }
 }
 
-// Rebuild reshadeEffectEntries from a fresh drop-in scan (["None"] + [names]), preserving the active
-// selection by NAME. [selectId] forces a specific effect to become selected (used right after a
-// download so the just-installed effect is the active one). [names] is passed in already-scanned (do
-// the scan off the main thread); this only touches Compose state, so call it on the main thread.
-private fun applyReshadeEntries(
-    context: android.content.Context,
-    state: GameSettingsStateHolder,
-    names: List<String>,
-    selectId: String? = null,
-) {
-    val prevEntries = state.reshadeEffectEntries.value
-    val prevName = prevEntries.getOrNull(state.selectedReshadeEffect.intValue)
-    val entries = ArrayList<String>(names.size + 1)
-    entries.add(context.getString(R.string.reshade_none))
-    entries.addAll(names)
-    state.reshadeEffectEntries.value = entries
-    val targetName = selectId ?: prevName
-    val idx = if (targetName == null) 0
-    else entries.indexOfFirst { it.equals(targetName, ignoreCase = true) }.let { if (it >= 0) it else 0 }
-    state.selectedReshadeEffect.intValue = idx
-}
 
 /**
  * Online ReShade catalog picker. Lists installed (pinned, full-opacity) + available (greyed) effects
@@ -2634,6 +2701,8 @@ private fun ReshadeCatalogDialog(
     var phaseLabel by remember { mutableStateOf("") }
     var progress by remember { mutableStateOf(0f) }
     var errorMsg by remember { mutableStateOf<String?>(null) }
+    // The installed effect whose trash button was tapped — drives the delete-confirm AlertDialog below.
+    var pendingDelete by remember { mutableStateOf<ReshadeCatalogEntry?>(null) }
     // After a download completes the row hops Available→Installed (new LazyColumn key → new composable).
     // We stash the finished id here so the moved row (not "Done") is the sole nav entry; a one-shot
     // LaunchedEffect below re-seats the pane-nav cursor onto its new slot, keeping the controller in the
@@ -2670,8 +2739,8 @@ private fun ReshadeCatalogDialog(
     // Only a live NETWORK load can fetch not-yet-installed effects; CACHE/NONE = offline.
     val offline = source != ReshadeCatalog.Source.NETWORK
 
-    // The active effect name (dropdown selection), for the pinned check mark.
-    val selectedName = state.reshadeEffectEntries.value.getOrNull(state.selectedReshadeEffect.intValue)
+    // Effects already in the loadout — pinned/checked in the picker (multi-select membership).
+    val inLoadout = state.reshadeLoadout.order.toSet()
 
     // Rows = catalog entries + any locally-installed effect missing from the catalog (user-dropped),
     // filtered by the query and split into pinned Installed + greyed Available, each A→Z.
@@ -2718,10 +2787,12 @@ private fun ReshadeCatalogDialog(
             downloadingId = null
             if (ok) {
                 installed = installed + entry.id
-                // Rescan the drop-in folder off the main thread, then apply on the main thread so the
-                // new effect shows in the dropdown (reshadeEffectEntries) and becomes the active one.
-                val names = withContext(Dispatchers.IO) { ReshadeManager.scanEffectNames(context) }
-                applyReshadeEntries(context, state, names, selectId = entry.id)
+                // Rescan the drop-in folder off the main thread, then reconcile the effect pool on the
+                // main thread and ADD the just-installed effect to the loadout.
+                val effects = withContext(Dispatchers.IO) { ReshadeManager.scanEffects(context) }
+                rescanReshadeEffects(state, effects)
+                effects.firstOrNull { it.name.equals(entry.id, ignoreCase = true) || it.name.equals(entry.name, ignoreCase = true) }
+                    ?.let { state.reshadeLoadout.add(it, null) }
                 // Keep the controller in the list: re-seat the cursor on this row once it re-composes
                 // under the Installed group (see the LaunchedEffect keyed on installedRows below).
                 refocusId = entry.id
@@ -2839,10 +2910,15 @@ private fun ReshadeCatalogDialog(
                         ReshadeGroupHeader(stringResource(R.string.reshade_catalog_installed, installedRows.size))
                         installedRows.forEach { entry ->
                             key("i_${entry.id}") {
+                                // Resolve the installed effect's drop-in folder (the loadout keys on it).
+                                val effect = state.reshadeEffects.value.firstOrNull {
+                                    it.name.equals(entry.id, ignoreCase = true) || it.name.equals(entry.name, ignoreCase = true)
+                                }
+                                val member = effect != null && state.reshadeLoadout.contains(effect.name)
                                 ReshadeCatalogRow(
                                     entry = entry,
                                     isInstalled = true,
-                                    isSelected = entry.name.equals(selectedName, ignoreCase = true),
+                                    isSelected = member,
                                     isBusy = downloadingId == entry.id,
                                     offline = offline,
                                     phaseLabel = if (downloadingId == entry.id) phaseLabel else "",
@@ -2850,12 +2926,18 @@ private fun ReshadeCatalogDialog(
                                     installingLabel = installingLabel,
                                     isEntry = entry.id == refocusId,
                                     onClick = {
-                                        // Select this installed effect as the active one, then close.
-                                        val idx = state.reshadeEffectEntries.value
-                                            .indexOfFirst { it.equals(entry.name, ignoreCase = true) }
-                                        if (idx >= 0) state.selectedReshadeEffect.intValue = idx
-                                        onDismiss()
-                                    }
+                                        // Toggle this installed effect's loadout membership (multi-select;
+                                        // stays open so several effects can be added in one pass).
+                                        if (effect != null) {
+                                            when {
+                                                member -> state.reshadeLoadout.remove(effect.name)
+                                                state.reshadeLoadout.isFull() ->
+                                                    errorMsg = context.getString(R.string.reshade_loadout_full)
+                                                else -> state.reshadeLoadout.add(effect, null)
+                                            }
+                                        }
+                                    },
+                                    onDelete = { pendingDelete = entry }
                                 )
                             }
                         }
@@ -2897,6 +2979,43 @@ private fun ReshadeCatalogDialog(
             }
         }
       }
+    }
+
+    // Delete-confirm dialog for the trashed effect: removes it from storage + the loadout, then rescans.
+    pendingDelete?.let { entry ->
+        AlertDialog(
+            onDismissRequest = { pendingDelete = null },
+            title = { Text(stringResource(R.string.reshade_catalog_delete_title, entry.name)) },
+            text = { Text(stringResource(R.string.reshade_catalog_delete_body)) },
+            confirmButton = {
+                TextButton(onClick = {
+                    val id = entry.id
+                    pendingDelete = null
+                    scope.launch {
+                        val ok = withContext(Dispatchers.IO) { ReshadeManager.deleteEffect(context, id) }
+                        if (ok) {
+                            installed = installed - id                 // row drops back to "Available"
+                            // Drop it from the loadout (inverse of the add/select path) + refresh the pool.
+                            val effects = withContext(Dispatchers.IO) { ReshadeManager.scanEffects(context) }
+                            state.reshadeLoadout.order
+                                .filter { it.equals(id, ignoreCase = true) || it.equals(entry.name, ignoreCase = true) }
+                                .toList()
+                                .forEach { state.reshadeLoadout.remove(it) }
+                            rescanReshadeEffects(state, effects)
+                        } else {
+                            errorMsg = context.getString(R.string.reshade_catalog_delete_failed, entry.name)
+                        }
+                    }
+                }) {
+                    Text(stringResource(R.string.reshade_catalog_delete_confirm), color = DangerRed)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { pendingDelete = null }) {
+                    Text(stringResource(R.string.reshade_catalog_delete_cancel))
+                }
+            },
+        )
     }
 }
 
@@ -2996,6 +3115,7 @@ private fun ReshadeCatalogRow(
     installingLabel: String,
     isEntry: Boolean = false,
     onClick: () -> Unit,
+    onDelete: (() -> Unit)? = null,
 ) {
     val contentAlpha = if (isInstalled || isBusy) 1f else 0.5f
     Column(
@@ -3022,6 +3142,26 @@ private fun ReshadeCatalogRow(
                 }
             }
             Spacer(Modifier.width(8.dp))
+            // Trash — its OWN tap target (isolated from the row click) so deleting never toggles the
+            // row's loadout membership. Only for a settled (not mid-download) installed effect.
+            if (isInstalled && !isBusy && onDelete != null) {
+                Box(
+                    modifier = Modifier
+                        .size(34.dp)
+                        .clip(RoundedCornerShape(8.dp))
+                        .paneNavItem(cornerRadius = 8.dp, onActivate = onDelete, highlightColor = NavHighlight, tapToSelect = true)
+                        .clickable(onClick = onDelete),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        Icons.Filled.Delete,
+                        contentDescription = stringResource(R.string.reshade_catalog_delete_cd, entry.name),
+                        tint = DangerRed,
+                        modifier = Modifier.size(20.dp)
+                    )
+                }
+                Spacer(Modifier.width(4.dp))
+            }
             when {
                 isBusy -> {}
                 isInstalled -> {
