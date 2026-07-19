@@ -497,6 +497,10 @@
     <string name="reshade_catalog_done">Done</string>
     <string name="reshade_params_title">EFFECT PARAMETERS</string>
     <string name="reshade_params_reset">Reset</string>
+    <!-- In-game ReShade drawer pane (live control) -->
+    <string name="reshade_drawer_enable">Enable ReShade</string>
+    <string name="reshade_drawer_effect">Effect</string>
+    <string name="reshade_drawer_no_params">This effect exposes no adjustable parameters.</string>
 
     <!-- Container > Box64 -->
     <string name="container_box64_title">Box64</string>

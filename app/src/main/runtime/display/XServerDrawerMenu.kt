@@ -72,6 +72,7 @@ import androidx.compose.material.icons.automirrored.outlined.ViewList
 import androidx.compose.material.icons.outlined.Add
 import androidx.compose.material.icons.outlined.Apps
 import androidx.compose.material.icons.outlined.ArrowDropDown
+import androidx.compose.material.icons.outlined.AutoAwesome
 import androidx.compose.material.icons.outlined.Check
 import androidx.compose.material.icons.outlined.Close
 import androidx.compose.material.icons.outlined.DeleteSweep
@@ -167,6 +168,7 @@ import androidx.compose.ui.window.Popup
 import androidx.compose.ui.window.PopupPositionProvider
 import androidx.compose.ui.window.PopupProperties
 import com.winlator.cmod.R
+import com.winlator.cmod.runtime.reshade.ReshadeManager
 import com.winlator.cmod.shared.theme.WinNativeBackground
 import com.winlator.cmod.shared.theme.WinNativeOutline
 import com.winlator.cmod.shared.theme.WinNativePanel
@@ -475,7 +477,7 @@ internal enum class HUDMetricEditor(
     BACKGROUND_ALPHA(minPercent = 10, maxPercent = 100),
 }
 
-internal enum class DrawerPane { INPUT_CONTROLS, HUD, GYROSCOPE, SCREEN_EFFECTS, OUTPUT, TASK_MANAGER, LOGS, TOUCH }
+internal enum class DrawerPane { INPUT_CONTROLS, HUD, GYROSCOPE, SCREEN_EFFECTS, RESHADE, OUTPUT, TASK_MANAGER, LOGS, TOUCH }
 
 internal const val LogsPaneMaxLines = 2000
 internal const val LogsFlushIntervalMs = 200L
@@ -538,6 +540,14 @@ private val RAIL_PANES =
             pane = DrawerPane.SCREEN_EFFECTS,
             itemId = R.id.main_menu_screen_effects,
             labelRes = R.string.session_drawer_rail_label_effects,
+        ),
+        // Shown only when the host adds a main_menu_reshade item (via withReshadeState) — i.e. a ReShade
+        // effect was applied at launch on a Vulkan wrapper, so the patched vkBasalt layer is live.
+        RailPaneSpec(
+            pane = DrawerPane.RESHADE,
+            itemId = R.id.main_menu_reshade,
+            labelRes = R.string.reshade_section_title,
+            iconOverride = Icons.Outlined.AutoAwesome,
         ),
         // Shown only when the host adds a main_menu_output item to state.items.
         RailPaneSpec(
@@ -629,6 +639,15 @@ data class XServerDrawerState(
     val pixelateEnabled: Boolean = false,
     val pixelateBlock: Int = 6,
     val colorBlind: Int = 0,
+    // ReShade in-game live control. Populated (and the RESHADE rail tab shown) only via withReshadeState,
+    // i.e. when a ReShade effect was applied at launch on a Vulkan wrapper so the patched vkBasalt layer
+    // is live. reshadeEffectNames[0] == "None"; reshadeParamValues keys follow ReshadeManager.seedValues
+    // (scalar/bool/combo -> "<name>", color -> "<name>_<component>").
+    val reshadeEnabled: Boolean = false,
+    val reshadeEffectNames: List<String> = emptyList(),
+    val reshadeSelectedIndex: Int = 0,
+    val reshadeParamDefs: List<ReshadeManager.ReshadeParam> = emptyList(),
+    val reshadeParamValues: Map<String, Float> = emptyMap(),
     val inputControlsProfileNames: List<String> = emptyList(),
     val inputControlsSelectedProfileIndex: Int = 0,
     val inputControlsStyleNames: List<String> = emptyList(),
@@ -1052,6 +1071,15 @@ interface XServerDrawerActionListener {
     fun onColorBlindSelected(mode: Int)
 
     fun onResetEffects()
+
+    // ── ReShade live control ──
+    fun onReshadeEnabledChanged(enabled: Boolean)
+
+    fun onReshadeEffectSelected(index: Int)
+
+    fun onReshadeParamChanged(key: String, value: Float)
+
+    fun onReshadeReset()
 
     fun onInputControlsProfileSelected(index: Int)
 
@@ -1485,6 +1513,36 @@ fun withVitureState(
         outputVitureVolumeMax = volumeMax,
     )
 
+// Append the ReShade tab item + live-control state to the drawer state. Called by the host ONLY when a
+// ReShade effect was applied at launch (Vulkan wrapper), so the patched vkBasalt layer is loaded and the
+// in-game pane's rewrites take effect on the next frame. Mirrors withOutputState.
+fun withReshadeState(
+    state: XServerDrawerState,
+    enabled: Boolean,
+    effectNames: List<String>,
+    selectedIndex: Int,
+    paramDefs: List<ReshadeManager.ReshadeParam>,
+    paramValues: Map<String, Float>,
+    reshadeTitle: String,
+): XServerDrawerState {
+    val reshadeItem =
+        XServerDrawerItem(
+            itemId = R.id.main_menu_reshade,
+            title = reshadeTitle,
+            subtitle = "",
+            icon = Icons.Outlined.AutoAwesome,
+            active = enabled,
+        )
+    return state.copy(
+        items = state.items + reshadeItem,
+        reshadeEnabled = enabled,
+        reshadeEffectNames = effectNames,
+        reshadeSelectedIndex = selectedIndex,
+        reshadeParamDefs = paramDefs,
+        reshadeParamValues = paramValues,
+    )
+}
+
 @Composable
 internal fun XServerDrawerContent(
     state: XServerDrawerState,
@@ -1602,6 +1660,7 @@ internal fun XServerDrawerContent(
                                 DrawerPane.GYROSCOPE -> GyroscopePaneContent(state = state, listener = listener)
                                 DrawerPane.TOUCH -> TouchPaneContent(state = state, listener = listener, onClose = { onOpenPaneChange(null) })
                                 DrawerPane.SCREEN_EFFECTS -> ScreenEffectsPaneContent(state = state, listener = listener)
+                                DrawerPane.RESHADE -> ReshadePaneContent(state = state, listener = listener)
                                 DrawerPane.OUTPUT -> OutputPaneContent(state = state, listener = listener)
                                 DrawerPane.TASK_MANAGER ->
                                     TaskManagerPaneContent(

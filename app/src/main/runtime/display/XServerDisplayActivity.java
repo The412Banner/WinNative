@@ -84,6 +84,7 @@ import com.winlator.cmod.shared.android.AppTerminationHelper;
 import com.winlator.cmod.shared.ui.toast.WinToast;
 import com.winlator.cmod.runtime.wine.EnvVars;
 import com.winlator.cmod.runtime.reshade.ReshadeConfigWriter;
+import com.winlator.cmod.runtime.reshade.ReshadeManager;
 import com.winlator.cmod.runtime.wine.LocaleEnv;
 import com.winlator.cmod.shared.io.FileUtils;
 import com.winlator.cmod.runtime.system.CPUStatus;
@@ -450,6 +451,17 @@ public class XServerDisplayActivity extends FixedFontScaleAppCompatActivity {
     private boolean pixelateEnabled = false;
     private int pixelateBlock = 6;
     private int colorBlind = 0;
+    // ReShade in-game live state. reshadeSessionAvailable is true only when applyReshadeEnv actually
+    // enabled the layer at launch (Vulkan wrapper + a selected effect) — the RESHADE drawer tab and the
+    // live conf rewrites are gated on it. reshadeEffectNames[0] == "None"; reshadeParamValues follows the
+    // ReshadeManager.seedValues key scheme (scalar/bool/combo -> "<name>", color -> "<name>_<component>").
+    private boolean reshadeSessionAvailable = false;
+    private boolean reshadeEnabled = false;
+    private String reshadeEffectName = "";
+    private final java.util.ArrayList<String> reshadeEffectNames = new java.util.ArrayList<>();
+    private int reshadeSelectedIndex = 0;
+    private java.util.List<ReshadeManager.ReshadeParam> reshadeParamDefs = new java.util.ArrayList<>();
+    private final java.util.LinkedHashMap<String, Float> reshadeParamValues = new java.util.LinkedHashMap<>();
     private boolean gyroscopeCardExpanded = false;
     private XServerDrawerStateHolder drawerStateHolder;
     private XServerDrawerActionListener drawerActionListener;
@@ -681,9 +693,65 @@ public class XServerDisplayActivity extends FixedFontScaleAppCompatActivity {
             String params = getShortcutSetting(
                     ReshadeConfigWriter.EXTRA_PARAMS, container.getExtra(ReshadeConfigWriter.EXTRA_PARAMS));
             boolean vulkanWrapper = ReshadeConfigWriter.supportedFor(this.dxwrapper);
-            ReshadeConfigWriter.apply(this, imageFs, effect, params, vulkanWrapper, envVars);
+            boolean applied = ReshadeConfigWriter.apply(this, imageFs, effect, params, vulkanWrapper, envVars);
+            reshadeSessionAvailable = applied;
+            reshadeEnabled = applied;
+            reshadeEffectName = applied ? effect : "";
+            if (applied) initReshadeSessionState(effect, params);
         } catch (Exception e) {
             Log.e("XServerDisplayActivity", "ReShade env injection failed (ignored)", e);
+        }
+    }
+
+    // Seed the in-game ReShade model once, on the launch path, when the layer is actually enabled: the
+    // "None" + drop-in effect list for the live switcher, the selected index, and the reflected uniform
+    // defs/values for the running effect (its saved params win over the .fx defaults). Fully swallowed.
+    private void initReshadeSessionState(String effectName, String paramsJson) {
+        try {
+            reshadeEffectNames.clear();
+            reshadeEffectNames.add(getString(R.string.reshade_none));
+            reshadeEffectNames.addAll(ReshadeManager.scanEffectNames(this));
+            reshadeSelectedIndex = 0;
+            for (int i = 1; i < reshadeEffectNames.size(); i++) {
+                if (reshadeEffectNames.get(i).equalsIgnoreCase(effectName)) { reshadeSelectedIndex = i; break; }
+            }
+            seedReshadeParams(effectName, paramsJson);
+        } catch (Exception e) {
+            Log.e("XServerDisplayActivity", "initReshadeSessionState failed (ignored)", e);
+        }
+    }
+
+    // Reflect the given effect's uniforms and (re)seed reshadeParamValues. savedJson null -> .fx defaults.
+    private void seedReshadeParams(String effectName, String savedJson) {
+        ReshadeManager.ReshadeEffect eff =
+                (effectName == null || effectName.trim().isEmpty()) ? null : ReshadeManager.findEffect(this, effectName);
+        reshadeParamDefs = (eff != null) ? eff.params : new java.util.ArrayList<>();
+        org.json.JSONObject saved = null;
+        if (savedJson != null && !savedJson.trim().isEmpty()) {
+            try { saved = new org.json.JSONObject(savedJson); } catch (Exception ignored) {}
+        }
+        reshadeParamValues.clear();
+        for (ReshadeManager.ReshadeParam p : reshadeParamDefs) ReshadeManager.seedValues(p, saved, reshadeParamValues);
+    }
+
+    // Serialize the current live param map to JSON in the shared seedValues key scheme (or null when empty).
+    private String reshadeParamsJson() {
+        if (reshadeParamValues.isEmpty()) return null;
+        org.json.JSONObject obj = new org.json.JSONObject();
+        try {
+            for (java.util.Map.Entry<String, Float> e : reshadeParamValues.entrySet()) obj.put(e.getKey(), e.getValue().doubleValue());
+        } catch (Exception ignored) {}
+        return obj.length() == 0 ? null : obj.toString();
+    }
+
+    // Rewrite the running prefix's vkBasalt.conf so the patched libvkbasalt.so applies the change on its
+    // next frame. [restage] re-copies the effect files (only needed on a live effect SWITCH). Swallowed.
+    private void applyReshadeLive(boolean restage) {
+        try {
+            if (imageFs == null) return;
+            ReshadeConfigWriter.writeLiveConfig(this, imageFs, reshadeEffectName, reshadeParamsJson(), reshadeEnabled, restage);
+        } catch (Exception e) {
+            Log.e("XServerDisplayActivity", "applyReshadeLive failed (ignored)", e);
         }
     }
 
@@ -4087,6 +4155,18 @@ public class XServerDisplayActivity extends FixedFontScaleAppCompatActivity {
             }
         }
 
+        // ReShade tab — present only when the layer was enabled at launch (Vulkan wrapper + effect).
+        if (reshadeSessionAvailable) {
+            state = XServerDrawerMenuKt.withReshadeState(
+                    state,
+                    reshadeEnabled,
+                    reshadeEffectNames,
+                    reshadeSelectedIndex,
+                    reshadeParamDefs,
+                    new java.util.LinkedHashMap<>(reshadeParamValues),
+                    getString(R.string.reshade_section_title));
+        }
+
         if (drawerActionListener == null) {
             drawerActionListener = new XServerDrawerActionListener() {
                     @Override
@@ -4542,6 +4622,46 @@ public class XServerDisplayActivity extends FixedFontScaleAppCompatActivity {
                         colorBlind = 0;
                         saveScreenEffectsSettings();
                         applyScreenEffects();
+                        renderDrawerMenu();
+                    }
+
+                    @Override
+                    public void onReshadeEnabledChanged(boolean enabled) {
+                        reshadeEnabled = enabled;
+                        applyReshadeLive(false);
+                        renderDrawerMenu();
+                    }
+
+                    @Override
+                    public void onReshadeEffectSelected(int index) {
+                        reshadeSelectedIndex = Math.max(0, Math.min(index, reshadeEffectNames.size() - 1));
+                        if (reshadeSelectedIndex <= 0) {
+                            // "None": disable the layer live, drop the param model.
+                            reshadeEnabled = false;
+                            reshadeEffectName = "";
+                            reshadeParamDefs = new java.util.ArrayList<>();
+                            reshadeParamValues.clear();
+                            applyReshadeLive(false);
+                        } else {
+                            reshadeEffectName = reshadeEffectNames.get(reshadeSelectedIndex);
+                            reshadeEnabled = true;
+                            seedReshadeParams(reshadeEffectName, null); // switched effect -> .fx defaults
+                            applyReshadeLive(true);                     // stage the newly selected effect
+                        }
+                        renderDrawerMenu();
+                    }
+
+                    @Override
+                    public void onReshadeParamChanged(String key, float value) {
+                        reshadeParamValues.put(key, value);
+                        applyReshadeLive(false);
+                        renderDrawerMenu();
+                    }
+
+                    @Override
+                    public void onReshadeReset() {
+                        seedReshadeParams(reshadeEffectName, null); // back to .fx defaults
+                        applyReshadeLive(false);
                         renderDrawerMenu();
                     }
 
