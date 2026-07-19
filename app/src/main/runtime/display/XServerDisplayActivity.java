@@ -755,6 +755,34 @@ public class XServerDisplayActivity extends FixedFontScaleAppCompatActivity {
         }
     }
 
+    // Persist the current in-game ReShade selection/params back to the launch source so they survive a
+    // relaunch. Writes to the shortcut when it holds its own overrides, else to the container — the same
+    // entity Shortcut.getSettingExtra reads from at launch. Mid-session we must NOT flip
+    // use_container_defaults (the settings dialog only does that safely by re-saving every setting in one
+    // pass; here it would freeze the rest to their current values), so a defaults-following shortcut
+    // persists to the container instead. There's no separate "enabled" field in the saved model, so a
+    // disabled layer / "None" selection persists as a cleared effect (inherit / off). Fully swallowed.
+    private void persistReshadeSelection() {
+        try {
+            boolean on = reshadeEnabled
+                    && reshadeSelectedIndex >= 1
+                    && reshadeSelectedIndex < reshadeEffectNames.size();
+            String effect = on ? reshadeEffectNames.get(reshadeSelectedIndex) : null;
+            String params = on ? reshadeParamsJson() : null;
+            if (shortcut != null && !shortcut.usesContainerDefaults()) {
+                shortcut.putExtra(ReshadeConfigWriter.EXTRA_EFFECT, effect); // null -> remove -> inherit container
+                shortcut.putExtra(ReshadeConfigWriter.EXTRA_PARAMS, params);
+                shortcut.saveData();
+            } else if (container != null) {
+                container.putExtra(ReshadeConfigWriter.EXTRA_EFFECT, effect);
+                container.putExtra(ReshadeConfigWriter.EXTRA_PARAMS, params);
+                container.saveData();
+            }
+        } catch (Exception e) {
+            Log.e("XServerDisplayActivity", "persistReshadeSelection failed (ignored)", e);
+        }
+    }
+
     private boolean getBooleanSessionOption(String key, boolean defaultValue) {
         boolean fallback = preferences != null ? preferences.getBoolean(key, defaultValue) : defaultValue;
         if (shortcut == null) return fallback;
@@ -4629,6 +4657,7 @@ public class XServerDisplayActivity extends FixedFontScaleAppCompatActivity {
                     public void onReshadeEnabledChanged(boolean enabled) {
                         reshadeEnabled = enabled;
                         applyReshadeLive(false);
+                        persistReshadeSelection();
                         renderDrawerMenu();
                     }
 
@@ -4648,6 +4677,7 @@ public class XServerDisplayActivity extends FixedFontScaleAppCompatActivity {
                             seedReshadeParams(reshadeEffectName, null); // switched effect -> .fx defaults
                             applyReshadeLive(true);                     // stage the newly selected effect
                         }
+                        persistReshadeSelection();
                         renderDrawerMenu();
                     }
 
@@ -4655,6 +4685,7 @@ public class XServerDisplayActivity extends FixedFontScaleAppCompatActivity {
                     public void onReshadeParamChanged(String key, float value) {
                         reshadeParamValues.put(key, value);
                         applyReshadeLive(false);
+                        persistReshadeSelection();
                         renderDrawerMenu();
                     }
 
@@ -4662,6 +4693,7 @@ public class XServerDisplayActivity extends FixedFontScaleAppCompatActivity {
                     public void onReshadeReset() {
                         seedReshadeParams(reshadeEffectName, null); // back to .fx defaults
                         applyReshadeLive(false);
+                        persistReshadeSelection();
                         renderDrawerMenu();
                     }
 
