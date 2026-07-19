@@ -1477,11 +1477,7 @@
     <string name="settings_content_refresh">Обновить</string>
     <!-- ReShade -->
     <string name="reshade_section_title">ReShade</string>
-    <string name="reshade_effect_label">Эффект ReShade</string>
-    <string name="reshade_none">Нет</string>
     <string name="reshade_section_hint">Применяйте эффект ReShade (.fx) к играм DXVK/VKD3D (Vulkan) через встроенный слой vkBasalt. Поместите каждый эффект в отдельную папку в Android/data/&lt;package&gt;/files/ReShade/. Настройка параметров в реальном времени и переключатель в игре появятся с обновлением слоя с горячей перезагрузкой.</string>
-    <string name="reshade_empty_hint">Эффекты не найдены. Добавьте папку эффекта ReShade (.fx и любые .fxh/текстуры) в Android/data/&lt;package&gt;/files/ReShade/.</string>
-    <string name="reshade_browse">Обзор &amp; загрузка эффектов</string>
     <string name="reshade_catalog_title">Эффекты ReShade</string>
     <string name="reshade_catalog_search">Поиск эффектов…</string>
     <string name="reshade_catalog_installed">Установлено (%1$d)</string>
@@ -1495,4 +1491,23 @@
     <string name="reshade_catalog_empty_query">Нет эффектов, соответствующих \"%1$s\".</string>
     <string name="reshade_catalog_empty">Нет доступных эффектов. Подключитесь к интернету, чтобы просмотреть каталог.</string>
     <string name="reshade_catalog_done">Готово</string>
+    <string name="reshade_catalog_delete_cd">Удалить %1$s</string>
+    <string name="reshade_catalog_delete_title">Удалить %1$s?</string>
+    <string name="reshade_catalog_delete_body">Это удалит эффект из хранилища и из всех наборов, где он используется. Позже вы сможете скачать его снова.</string>
+    <string name="reshade_catalog_delete_confirm">Удалить</string>
+    <string name="reshade_catalog_delete_cancel">Отмена</string>
+    <string name="reshade_catalog_delete_failed">Не удалось удалить %1$s.</string>
+    <string name="reshade_params_title">ПАРАМЕТРЫ ЭФФЕКТА</string>
+    <string name="reshade_params_reset">Сбросить</string>
+    <string name="reshade_loadout_empty">Пока нет эффектов. Добавьте один или несколько эффектов, чтобы создать набор.</string>
+    <string name="reshade_loadout_add">Добавить эффект</string>
+    <string name="reshade_loadout_full">Набор заполнен — удалите эффект, чтобы добавить другой.</string>
+    <string name="reshade_effect_active">активен</string>
+    <string name="reshade_mode_solo">Соло</string>
+    <string name="reshade_mode_stack">Стек</string>
+    <string name="reshade_mode_solo_hint">Одновременно активен один эффект (сравнение A/B, переключение на лету в игре).</string>
+    <string name="reshade_mode_stack_hint">Наложите любой набор эффектов, применяются по порядку.</string>
+    <string name="reshade_drawer_enable">Включить ReShade</string>
+    <string name="reshade_drawer_empty">В этом наборе нет эффектов ReShade. Добавьте эффекты в настройках этой игры (или контейнера), чтобы переключать и настраивать их здесь.</string>
+    <string name="reshade_drawer_no_params">У этого эффекта нет настраиваемых параметров.</string>
 </resources>

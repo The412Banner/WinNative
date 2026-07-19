@@ -477,11 +477,7 @@
 
     <!-- ReShade drop-in effects (vkBasalt) -->
     <string name="reshade_section_title">ReShade</string>
-    <string name="reshade_effect_label">ReShade effect</string>
-    <string name="reshade_none">None</string>
     <string name="reshade_section_hint">Apply a ReShade (.fx) effect to DXVK/VKD3D (Vulkan) games via the bundled vkBasalt layer. Drop each effect into its own folder under Android/data/&lt;package&gt;/files/ReShade/. Live parameter tuning and the in-game toggle arrive with the live-reload layer update.</string>
-    <string name="reshade_empty_hint">No effects found. Add a ReShade effect folder (the .fx plus any .fxh/textures) under Android/data/&lt;package&gt;/files/ReShade/.</string>
-    <string name="reshade_browse">Browse &amp; download effects</string>
     <string name="reshade_catalog_title">ReShade effects</string>
     <string name="reshade_catalog_search">Search effects…</string>
     <string name="reshade_catalog_installed">Installed (%1$d)</string>
@@ -514,7 +510,6 @@
     <string name="reshade_mode_stack_hint">Layer any subset of effects, applied in order.</string>
     <!-- In-game ReShade drawer pane (live control) -->
     <string name="reshade_drawer_enable">Enable ReShade</string>
-    <string name="reshade_drawer_effect">Effect</string>
     <string name="reshade_drawer_empty">No ReShade effects in this loadout. Add effects in this game\'s settings (or the container\'s) to switch and tune them here.</string>
     <string name="reshade_drawer_no_params">This effect exposes no adjustable parameters.</string>
 
