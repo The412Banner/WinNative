@@ -39,6 +39,8 @@ import androidx.compose.foundation.relocation.BringIntoViewRequester
 import androidx.compose.foundation.relocation.bringIntoViewRequester
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
@@ -47,6 +49,7 @@ import androidx.compose.material.icons.automirrored.outlined.HelpOutline
 import androidx.compose.material.icons.automirrored.outlined.OpenInNew
 import androidx.compose.material.icons.outlined.Code
 import androidx.compose.material.icons.outlined.Extension
+import androidx.compose.material.icons.outlined.AutoAwesome
 import androidx.compose.material.icons.outlined.Monitor
 import androidx.compose.material.icons.outlined.Science
 import androidx.compose.material.icons.outlined.Settings
@@ -59,6 +62,8 @@ import androidx.compose.material.icons.outlined.Close
 import androidx.compose.material.icons.outlined.Home
 import androidx.compose.material.icons.outlined.Inventory
 import androidx.compose.material.icons.outlined.KeyboardArrowDown
+import androidx.compose.material.icons.outlined.CloudOff
+import androidx.compose.material.icons.outlined.Search
 import androidx.compose.material.icons.outlined.Download
 import androidx.compose.material.icons.outlined.Upload
 import androidx.compose.material3.Checkbox
@@ -73,21 +78,31 @@ import androidx.compose.material3.SliderState
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import androidx.compose.ui.window.PopupProperties
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.MutableState
 import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.Stable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.key
+import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusProperties
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -96,6 +111,7 @@ import androidx.compose.ui.input.pointer.PointerEventType
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.positionInWindow
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.res.stringResource
@@ -113,9 +129,22 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.draw.scale
 import com.winlator.cmod.R
+import com.winlator.cmod.runtime.reshade.ReshadeCatalog
+import com.winlator.cmod.runtime.reshade.ReshadeCatalogEntry
+import com.winlator.cmod.runtime.reshade.ReshadeDownloader
+import com.winlator.cmod.runtime.reshade.ReshadeManager
 import com.winlator.cmod.runtime.wine.WineThemeManager
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import org.json.JSONObject
 import androidx.compose.foundation.focusable
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onKeyEvent
+import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.ui.input.key.type
 import com.winlator.cmod.shared.ui.focus.controllerFocusBorder
 import com.winlator.cmod.shared.ui.focus.controllerFocusGlow
 import com.winlator.cmod.shared.ui.focus.controllerSliderEscape
@@ -377,6 +406,23 @@ class GameSettingsStateHolder {
     val sgsrUpscaleMode = mutableIntStateOf(1)
     val sgsrSharpness = mutableIntStateOf(100)
 
+    // ReShade drop-in effect. reshadeEffectEntries[0] == "None"; the selected index maps to the
+    // effect's drop-in folder name (persisted as the "reshadeEffect" extra). Populated at load from
+    // ReshadeManager.scanEffectNames().
+    val reshadeEffectEntries = mutableStateOf(listOf("None"))
+    val selectedReshadeEffect = mutableIntStateOf(0)
+
+    // Per-effect ReShade parameter overrides (persisted as the "reshadeParams" JSON extra). Current
+    // values are keyed by the shared ReshadeManager.seedValues scheme: scalar/bool/combo -> "<name>",
+    // color -> "<name>_<component>". reshadeParamDefs is the reflected uniform list for the currently
+    // selected effect (empty for "None"); both are seeded at load from the saved JSON + .fx defaults
+    // and re-seeded when the effect selection changes. reshadeSavedEffect/reshadeSavedParamsJson keep
+    // the as-loaded values so a live switch back to the loaded effect restores its saved overrides.
+    val reshadeParamValues = mutableStateMapOf<String, Float>()
+    val reshadeParamDefs = mutableStateOf<List<ReshadeManager.ReshadeParam>>(emptyList())
+    val reshadeSavedEffect = mutableStateOf("")
+    val reshadeSavedParamsJson = mutableStateOf("")
+
     // Graphics Driver Configuration (inline card)
     val gfxConfigExpanded = mutableStateOf(false)
     val gfxVulkanVersionEntries = mutableStateOf<List<String>>(emptyList())
@@ -605,6 +651,7 @@ private data class SidebarSection(
 private const val SEC_GENERAL = 0
 private const val SEC_STEAM = 1
 private const val SEC_DISPLAY = 2
+private const val SEC_RESHADE = 3
 private const val SEC_WINE = 4
 private const val SEC_COMPONENTS = 5
 private const val SEC_VARIABLES = 6
@@ -619,6 +666,7 @@ private fun buildSections(isSteam: Boolean, isContainer: Boolean): List<Pair<Int
     if (isSteam) list += SEC_STEAM to SidebarSection(Icons.Outlined.Science, R.string.steam_section_title)
     list += SEC_DISPLAY to SidebarSection(Icons.Outlined.Monitor, R.string.common_ui_graphics)
     list += SEC_ADVANCED to SidebarSection(Icons.Outlined.Settings, R.string.common_ui_advanced)
+    list += SEC_RESHADE to SidebarSection(Icons.Outlined.AutoAwesome, R.string.reshade_section_title)
     list += SEC_INPUT to SidebarSection(Icons.Outlined.SportsEsports, R.string.common_ui_input_controls)
     if (isContainer) {
         list += SEC_DRIVES to SidebarSection(Icons.Outlined.Storage, R.string.container_config_drives)
@@ -796,6 +844,7 @@ private fun SectionContent(
                     SEC_GENERAL -> GeneralSection(state, callbacks)
                     SEC_STEAM -> SteamSection(state)
                     SEC_DISPLAY -> DisplaySection(state, callbacks)
+                    SEC_RESHADE -> ReshadeSection(state)
                     SEC_WINE -> WineSection(state, callbacks)
                     SEC_COMPONENTS -> ComponentsSection(state, callbacks)
                     SEC_VARIABLES -> VariablesSection(state, callbacks)
@@ -2140,6 +2189,871 @@ private fun WineD3DConfigCard(state: GameSettingsStateHolder) {
                         )
                     }
                 }
+            }
+        }
+    }
+}
+
+@Composable
+private fun ReshadeSection(state: GameSettingsStateHolder) {
+    val context = LocalContext.current
+    val entries = state.reshadeEffectEntries.value
+    val hasEffects = entries.size > 1  // entries[0] is always "None"
+    var showCatalog by remember { mutableStateOf(false) }
+
+    // Re-seed the param model whenever the selected effect changes. Keyed on the effect NAME so
+    // in-place control edits (which never change the selected name) are not clobbered. Switching back
+    // to the as-loaded effect restores its saved overrides; any other effect seeds from .fx defaults.
+    val selectedIdx = state.selectedReshadeEffect.intValue
+    val selectedName = entries.getOrNull(selectedIdx)
+    LaunchedEffect(selectedName, selectedIdx) {
+        if (selectedName == null || selectedIdx < 1) {
+            state.reshadeParamDefs.value = emptyList()
+            state.reshadeParamValues.clear()
+        } else {
+            val useSaved = selectedName.equals(state.reshadeSavedEffect.value, ignoreCase = true)
+            val savedJson = if (useSaved) state.reshadeSavedParamsJson.value else null
+            withContext(Dispatchers.IO) { seedReshadeParams(context, state, selectedName, savedJson) }
+        }
+    }
+
+    SubsectionLabel(stringResource(R.string.reshade_section_title))
+    Spacer(Modifier.height(8.dp))
+    Text(
+        text = stringResource(R.string.reshade_section_hint),
+        color = TextSecondary
+    )
+    Spacer(Modifier.height(SettingSectionGap))
+
+    SettingGroup {
+        // Local-scan dropdown — unchanged: picks which already-installed effect is active for this
+        // game/container (persisted via the reshadeEffect extra).
+        SettingDropdown(
+            label = stringResource(R.string.reshade_effect_label),
+            entries = entries,
+            selectedIndex = state.selectedReshadeEffect.intValue
+                .coerceIn(0, (entries.size - 1).coerceAtLeast(0)),
+            onSelected = { state.selectedReshadeEffect.intValue = it }
+        )
+        if (!hasEffects) {
+            Spacer(Modifier.height(8.dp))
+            Text(
+                text = stringResource(R.string.reshade_empty_hint),
+                color = TextSecondary
+            )
+        }
+
+        // Browse & download affordance: opens the online catalog picker. New downloads land in the
+        // ReShade/ drop-in folder and are rescanned into the dropdown above.
+        Spacer(Modifier.height(SettingItemGap))
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(SettingFieldCorner))
+                .paneNavItem(
+                    cornerRadius = SettingFieldCorner,
+                    onActivate = { showCatalog = true },
+                    highlightColor = NavHighlight,
+                )
+                .clickable { showCatalog = true }
+                .padding(horizontal = SettingFieldHorizontalPadding, vertical = SettingFieldVerticalPadding),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Icon(
+                Icons.Outlined.Download,
+                contentDescription = null,
+                tint = AccentBlue,
+                modifier = Modifier.size(SettingIconSize)
+            )
+            Spacer(Modifier.width(8.dp))
+            Text(
+                stringResource(R.string.reshade_browse),
+                color = AccentBlue,
+                fontSize = SettingValueSize,
+                fontWeight = FontWeight.Medium
+            )
+        }
+    }
+
+    // Typed pre-launch controls for the selected effect's reflected uniforms. Written to the
+    // reshadeParams extra on save; the launch path (ReshadeConfigWriter) applies them.
+    if (selectedIdx >= 1) {
+        ReshadeParamControls(state)
+    }
+
+    if (showCatalog) {
+        ReshadeCatalogDialog(state = state, onDismiss = { showCatalog = false })
+    }
+}
+
+// Reflect the selected effect's uniforms and seed the value map (saved JSON wins over .fx defaults).
+// effectName null/blank -> clears the model. Reads the effect's .fx off the caller's thread; callers
+// on the main thread do this synchronously (a small local read, same as scanEffectNames), the live
+// selection-change path wraps it in Dispatchers.IO.
+internal fun seedReshadeParams(
+    context: android.content.Context,
+    state: GameSettingsStateHolder,
+    effectName: String?,
+    savedJson: String?
+) {
+    val defs: List<ReshadeManager.ReshadeParam> =
+        if (effectName.isNullOrBlank()) emptyList()
+        else ReshadeManager.findEffect(context, effectName)?.params ?: emptyList()
+    val saved: JSONObject? = try {
+        if (!savedJson.isNullOrBlank()) JSONObject(savedJson) else null
+    } catch (e: Exception) { null }
+    val values = LinkedHashMap<String, Float>()
+    for (p in defs) ReshadeManager.seedValues(p, saved, values)
+    state.reshadeParamDefs.value = defs
+    state.reshadeParamValues.clear()
+    state.reshadeParamValues.putAll(values)
+}
+
+// Restore every param of the selected effect to its .fx default (re-seed with no saved overrides).
+private fun resetReshadeParams(state: GameSettingsStateHolder) {
+    val values = LinkedHashMap<String, Float>()
+    for (p in state.reshadeParamDefs.value) ReshadeManager.seedValues(p, null, values)
+    state.reshadeParamValues.clear()
+    state.reshadeParamValues.putAll(values)
+}
+
+// Serialize the current param value map to a JSON string in the shared seedValues key scheme, or null
+// when there is nothing to persist (None selected / no reflected params). Written to the reshadeParams
+// extra by both editors' save paths.
+internal fun reshadeParamsToJson(state: GameSettingsStateHolder): String? {
+    if (state.reshadeParamDefs.value.isEmpty() || state.reshadeParamValues.isEmpty()) return null
+    val obj = JSONObject()
+    for ((k, v) in state.reshadeParamValues) obj.put(k, v.toDouble())
+    return if (obj.length() == 0) null else obj.toString()
+}
+
+private fun reshadeColorComponentLabel(c: Int, components: Int): String = when {
+    components >= 4 && c == 3 -> "A"
+    c == 0 -> "R"
+    c == 1 -> "G"
+    c == 2 -> "B"
+    else -> (c + 1).toString()
+}
+
+@Composable
+private fun ReshadeParamControls(state: GameSettingsStateHolder) {
+    val defs = state.reshadeParamDefs.value
+    if (defs.isEmpty()) return
+
+    Spacer(Modifier.height(SettingSectionGap))
+    SettingGroup {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                text = stringResource(R.string.reshade_params_title),
+                color = TextSecondary,
+                fontSize = SettingSectionLabelSize,
+                fontWeight = FontWeight.SemiBold,
+                letterSpacing = 0.8.sp,
+                modifier = Modifier.weight(1f)
+            )
+            Text(
+                text = stringResource(R.string.reshade_params_reset),
+                color = AccentBlue,
+                fontSize = SettingLabelSize,
+                fontWeight = FontWeight.Medium,
+                modifier = Modifier
+                    .clip(RoundedCornerShape(6.dp))
+                    .paneNavItem(
+                        cornerRadius = 6.dp,
+                        onActivate = { resetReshadeParams(state) },
+                        highlightColor = NavHighlight,
+                        tapToSelect = true,
+                    )
+                    .clickable { resetReshadeParams(state) }
+                    .padding(horizontal = 8.dp, vertical = 4.dp)
+            )
+        }
+
+        for (p in defs) {
+            Spacer(Modifier.height(SettingItemGap))
+            when (p.type) {
+                ReshadeManager.ParamType.BOOL -> {
+                    val v = state.reshadeParamValues[p.name] ?: p.defaultValue
+                    SettingCheckbox(
+                        label = p.label,
+                        checked = v != 0f,
+                        onCheckedChange = { state.reshadeParamValues[p.name] = if (it) 1f else 0f }
+                    )
+                }
+                ReshadeManager.ParamType.COMBO -> {
+                    val options = p.options ?: emptyList()
+                    val v = (state.reshadeParamValues[p.name] ?: p.defaultValue).roundToInt()
+                    SettingDropdown(
+                        label = p.label,
+                        entries = options,
+                        selectedIndex = v.coerceIn(0, (options.size - 1).coerceAtLeast(0)),
+                        onSelected = { state.reshadeParamValues[p.name] = it.toFloat() }
+                    )
+                }
+                ReshadeManager.ParamType.COLOR -> ReshadeColorControl(state, p)
+                ReshadeManager.ParamType.INT -> {
+                    val v = state.reshadeParamValues[p.name] ?: p.defaultValue
+                    ReshadeFloatSlider(
+                        label = p.label,
+                        value = v,
+                        min = p.min,
+                        max = p.max,
+                        step = if (p.step > 0f) p.step else 1f,
+                        whole = true,
+                        onValueChange = { state.reshadeParamValues[p.name] = it }
+                    )
+                }
+                else -> { // FLOAT
+                    val v = state.reshadeParamValues[p.name] ?: p.defaultValue
+                    ReshadeFloatSlider(
+                        label = p.label,
+                        value = v,
+                        min = p.min,
+                        max = p.max,
+                        step = p.step,
+                        whole = false,
+                        onValueChange = { state.reshadeParamValues[p.name] = it }
+                    )
+                }
+            }
+        }
+    }
+}
+
+// Color param rendered as a tappable swatch that expands to per-channel (R/G/B[/A]) sliders, instead
+// of always-visible channel sliders — cuts the clutter on color-grading effects (many float3 colors).
+@Composable
+private fun ReshadeColorControl(state: GameSettingsStateHolder, p: ReshadeManager.ReshadeParam) {
+    val expanded = remember(p.name) { mutableStateOf(false) }
+
+    fun comp(c: Int): Float =
+        state.reshadeParamValues[p.name + "_" + c] ?: (p.componentDefaults?.getOrNull(c) ?: 0f)
+    val r = comp(0)
+    val g = if (p.components > 1) comp(1) else r
+    val b = if (p.components > 2) comp(2) else r
+    val swatch = Color(r.coerceIn(0f, 1f), g.coerceIn(0f, 1f), b.coerceIn(0f, 1f))
+
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(8.dp))
+            .paneNavItem(
+                cornerRadius = 8.dp,
+                onActivate = { expanded.value = !expanded.value },
+                highlightColor = NavHighlight,
+                tapToSelect = true,
+            )
+            .clickable { expanded.value = !expanded.value }
+            .padding(vertical = 4.dp)
+    ) {
+        Box(
+            Modifier
+                .size(22.dp)
+                .clip(RoundedCornerShape(5.dp))
+                .background(swatch)
+                .border(1.dp, CardBorder, RoundedCornerShape(5.dp))
+        )
+        Spacer(Modifier.width(10.dp))
+        Text(
+            text = p.label,
+            color = TextPrimary,
+            fontSize = SettingLabelSize,
+            modifier = Modifier.weight(1f)
+        )
+        Icon(
+            imageVector = if (expanded.value) Icons.Outlined.KeyboardArrowUp else Icons.Outlined.KeyboardArrowDown,
+            contentDescription = null,
+            tint = TextSecondary
+        )
+    }
+    if (expanded.value) {
+        for (c in 0 until p.components) {
+            val key = p.name + "_" + c
+            Spacer(Modifier.height(SettingTightGap))
+            ReshadeFloatSlider(
+                label = reshadeColorComponentLabel(c, p.components),
+                value = state.reshadeParamValues[key] ?: (p.componentDefaults?.getOrNull(c) ?: 0f),
+                min = 0f,
+                max = 1f,
+                step = 0.01f,
+                whole = false,
+                onValueChange = { state.reshadeParamValues[key] = it }
+            )
+        }
+    }
+}
+
+// Float-valued slider matching SettingSlider's look, used for FLOAT/INT scalars and COLOR components.
+// [whole] snaps to integers (INT); otherwise snaps to [step]. D-pad adjust steps by one increment.
+@Composable
+@OptIn(ExperimentalMaterial3Api::class)
+private fun ReshadeFloatSlider(
+    label: String,
+    value: Float,
+    min: Float,
+    max: Float,
+    step: Float,
+    whole: Boolean,
+    onValueChange: (Float) -> Unit
+) {
+    val lo = min
+    val hi = if (max > min) max else min + 1f
+    val inc = if (whole) 1f else (if (step > 0f) step else (hi - lo) / 100f)
+    val valueText = if (whole) value.roundToInt().toString()
+        else String.format(java.util.Locale.US, "%.2f", value)
+
+    fun snap(raw: Float): Float {
+        val v = when {
+            whole -> raw.roundToInt().toFloat()
+            step > 0f -> lo + Math.round((raw - lo) / step) * step
+            else -> raw
+        }
+        return v.coerceIn(lo, hi)
+    }
+
+    Column(modifier = Modifier.fillMaxWidth()) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                label,
+                color = TextSecondary,
+                fontSize = SettingLabelSize,
+                fontWeight = FontWeight.Medium,
+                letterSpacing = 0.3.sp
+            )
+            Spacer(Modifier.weight(1f))
+            Box(
+                modifier = Modifier
+                    .clip(RoundedCornerShape(6.dp))
+                    .background(AccentBlue.copy(alpha = 0.1f))
+                    .padding(horizontal = 7.dp, vertical = 2.dp)
+            ) {
+                Text(
+                    valueText,
+                    color = AccentBlue,
+                    fontSize = SettingLabelSize,
+                    fontWeight = FontWeight.SemiBold
+                )
+            }
+        }
+        Spacer(Modifier.height(SettingTightGap))
+        Slider(
+            value = value.coerceIn(lo, hi),
+            onValueChange = { onValueChange(snap(it)) },
+            valueRange = lo..hi,
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(SettingSliderHeight)
+                .controllerSliderEscape()
+                .paneNavItem(
+                    cornerRadius = 8.dp,
+                    onAdjust = { d -> onValueChange((value + d * inc).coerceIn(lo, hi)) },
+                    highlightColor = NavHighlight,
+                ),
+            colors = settingSliderColors(),
+            track = { SettingSliderTrack(it) },
+            thumb = {
+                Box(
+                    modifier = Modifier
+                        .size(SettingSliderThumbSize)
+                        .clip(RoundedCornerShape(50))
+                        .background(AccentBlue)
+                        .border(2.dp, CardSurface, RoundedCornerShape(50))
+                )
+            }
+        )
+    }
+}
+
+// Rebuild reshadeEffectEntries from a fresh drop-in scan (["None"] + [names]), preserving the active
+// selection by NAME. [selectId] forces a specific effect to become selected (used right after a
+// download so the just-installed effect is the active one). [names] is passed in already-scanned (do
+// the scan off the main thread); this only touches Compose state, so call it on the main thread.
+private fun applyReshadeEntries(
+    context: android.content.Context,
+    state: GameSettingsStateHolder,
+    names: List<String>,
+    selectId: String? = null,
+) {
+    val prevEntries = state.reshadeEffectEntries.value
+    val prevName = prevEntries.getOrNull(state.selectedReshadeEffect.intValue)
+    val entries = ArrayList<String>(names.size + 1)
+    entries.add(context.getString(R.string.reshade_none))
+    entries.addAll(names)
+    state.reshadeEffectEntries.value = entries
+    val targetName = selectId ?: prevName
+    val idx = if (targetName == null) 0
+    else entries.indexOfFirst { it.equals(targetName, ignoreCase = true) }.let { if (it >= 0) it else 0 }
+    state.selectedReshadeEffect.intValue = idx
+}
+
+/**
+ * Online ReShade catalog picker. Lists installed (pinned, full-opacity) + available (greyed) effects
+ * from reshade.json with a search box; tapping an installed row makes it the active effect and closes,
+ * tapping a greyed row downloads → extracts into the ReShade/ drop-in folder → the row fills in and
+ * becomes the active effect. Offline: downloaded effects still browse/select from the cache; greyed
+ * rows can't be fetched.
+ *
+ * Hosted as a top-level Dialog because the settings screen is itself inside a dialog. Shared by the
+ * container editor and the per-game shortcut editor (ReshadeSection is common to both).
+ */
+@Composable
+private fun ReshadeCatalogDialog(
+    state: GameSettingsStateHolder,
+    onDismiss: () -> Unit,
+) {
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    val mainHandler = remember { android.os.Handler(android.os.Looper.getMainLooper()) }
+
+    // This catalog is a top-level Dialog, so its subcomposition inherits the settings pane's registry
+    // as LocalPaneNav. Give it its own registry and register that as the parent's overlay while shown
+    // — same wiring as the dropdown-option popup — so the parent delegates the D-pad to us instead of
+    // keeping the outline pinned on "Done" while every catalog item piles into the parent registry.
+    val parentNav = LocalPaneNav.current
+    val catalogNav = remember { PaneNavRegistry() }
+    catalogNav.controllerActive = parentNav?.controllerActive == true
+    DisposableEffect(Unit) {
+        catalogNav.reset()
+        parentNav?.overlay = catalogNav
+        parentNav?.overlayClose = onDismiss
+        onDispose {
+            if (parentNav?.overlay === catalogNav) {
+                parentNav.overlay = null
+                parentNav.overlayClose = null
+            }
+        }
+    }
+
+    var catalog by remember { mutableStateOf<List<ReshadeCatalogEntry>>(emptyList()) }
+    var installed by remember { mutableStateOf(setOf<String>()) }
+    var source by remember { mutableStateOf(ReshadeCatalog.Source.NONE) }
+    var loading by remember { mutableStateOf(true) }
+    var query by remember { mutableStateOf("") }
+    var downloadingId by remember { mutableStateOf<String?>(null) }
+    var phaseLabel by remember { mutableStateOf("") }
+    var progress by remember { mutableStateOf(0f) }
+    var errorMsg by remember { mutableStateOf<String?>(null) }
+    // After a download completes the row hops Available→Installed (new LazyColumn key → new composable).
+    // We stash the finished id here so the moved row (not "Done") is the sole nav entry; a one-shot
+    // LaunchedEffect below re-seats the pane-nav cursor onto its new slot, keeping the controller in the
+    // list instead of drifting to the search field. refocusId also gates Done's isEntry so only one item
+    // is ever the entry (two entries + a pending reset would fight over the cursor).
+    var refocusId by remember { mutableStateOf<String?>(null) }
+    var reseatPending by remember { mutableStateOf(false) }
+
+    // The catalog Dialog is a separate focusable window, so UnifiedActivity.dispatchKeyEvent never sees
+    // its D-pad events — they'd otherwise fall to Android's default focus traversal (a dark box walking
+    // the rows) and never reach catalogNav. We hold focus on the dialog root and preview-intercept the
+    // D-pad, routing it into catalogNav.navDir so the blue pane-nav outline moves like everywhere else.
+    val rootFocus = remember { FocusRequester() }
+    // Search editing is owned here (hoisted out of ReshadeCatalogSearchField) so the preview handler can
+    // stand down while the user types in the text field, then re-grab focus when editing ends.
+    var searchEditing by remember { mutableStateOf(false) }
+
+    // Grab focus on open, and re-grab it whenever search editing ends, so the root keeps previewing keys.
+    LaunchedEffect(searchEditing) {
+        if (!searchEditing) runCatching { rootFocus.requestFocus() }
+    }
+
+    val downloadingLabel = stringResource(R.string.reshade_catalog_downloading)
+    val installingLabel = stringResource(R.string.reshade_catalog_installing)
+
+    LaunchedEffect(Unit) {
+        val result = withContext(Dispatchers.IO) { ReshadeCatalog.loadCached(context) }
+        catalog = result.entries
+        source = result.source
+        installed = withContext(Dispatchers.IO) { ReshadeManager.scanEffectNames(context).toSet() }
+        loading = false
+    }
+
+    // Only a live NETWORK load can fetch not-yet-installed effects; CACHE/NONE = offline.
+    val offline = source != ReshadeCatalog.Source.NETWORK
+
+    // The active effect name (dropdown selection), for the pinned check mark.
+    val selectedName = state.reshadeEffectEntries.value.getOrNull(state.selectedReshadeEffect.intValue)
+
+    // Rows = catalog entries + any locally-installed effect missing from the catalog (user-dropped),
+    // filtered by the query and split into pinned Installed + greyed Available, each A→Z.
+    val groups = remember(catalog, installed, query) {
+        val q = query.trim()
+        val catIds = catalog.map { it.id }.toSet()
+        val extras = installed.filter { it !in catIds }
+            .map { ReshadeCatalogEntry(it, it, "", "Installed", "", "", "", 0L, "", 1) }
+        val all = (catalog + extras).filter { e ->
+            q.isEmpty() || e.name.contains(q, true) || e.author.contains(q, true) || e.category.contains(q, true)
+        }
+        val byName = compareBy<ReshadeCatalogEntry> { it.name.lowercase() }
+        Pair(
+            all.filter { it.id in installed }.sortedWith(byName),
+            all.filter { it.id !in installed }.sortedWith(byName),
+        )
+    }
+    val installedRows = groups.first
+    val availableRows = groups.second
+
+    // Once the just-downloaded row has re-composed inside the Installed group, its paneNavItem has run
+    // markEntry (it passes isEntry while it matches refocusId), so entrySlot now points at the new slot.
+    // reset() re-arms pendingEntry and selects that entry, landing the cursor on the moved row. One-shot:
+    // reseatPending guards against re-running on later recompositions (e.g. every search keystroke),
+    // and refocusId is deliberately kept so the row — not Done — stays the entry until the next download.
+    LaunchedEffect(reseatPending, installedRows) {
+        val id = refocusId ?: return@LaunchedEffect
+        if (reseatPending && installedRows.any { it.id == id }) {
+            catalogNav.reset()
+            reseatPending = false
+        }
+    }
+
+    fun startDownload(entry: ReshadeCatalogEntry) {
+        downloadingId = entry.id
+        phaseLabel = downloadingLabel; progress = 0f; errorMsg = null
+        scope.launch {
+            val ok = ReshadeDownloader.install(context, entry) { phase, f ->
+                mainHandler.post {
+                    phaseLabel = if (phase == ReshadeDownloader.Phase.EXTRACT) installingLabel else downloadingLabel
+                    progress = f
+                }
+            }
+            downloadingId = null
+            if (ok) {
+                installed = installed + entry.id
+                // Rescan the drop-in folder off the main thread, then apply on the main thread so the
+                // new effect shows in the dropdown (reshadeEffectEntries) and becomes the active one.
+                val names = withContext(Dispatchers.IO) { ReshadeManager.scanEffectNames(context) }
+                applyReshadeEntries(context, state, names, selectId = entry.id)
+                // Keep the controller in the list: re-seat the cursor on this row once it re-composes
+                // under the Installed group (see the LaunchedEffect keyed on installedRows below).
+                refocusId = entry.id
+                reseatPending = true
+            } else {
+                errorMsg = context.getString(R.string.reshade_catalog_download_failed, entry.name)
+            }
+        }
+    }
+
+    Dialog(
+        onDismissRequest = onDismiss,
+        properties = DialogProperties(usePlatformDefaultWidth = false)
+    ) {
+      CompositionLocalProvider(LocalPaneNav provides catalogNav) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth(0.92f)
+                .fillMaxHeight(0.86f)
+                .clip(RoundedCornerShape(SettingGroupCorner))
+                .background(ContentBg)
+                .border(1.dp, CardBorder, RoundedCornerShape(SettingGroupCorner))
+                // Root holds focus so it previews every key BEFORE default traversal moves the dark box;
+                // handled keys are consumed (return true) so that box never budges. onPreviewKeyEvent must
+                // sit before focusRequester/focusable so this focus target is the one that receives them.
+                .onPreviewKeyEvent { ev ->
+                    if (ev.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
+                    // While the search field is being edited, let it consume typing + directions itself;
+                    // only ButtonB/Back is stolen back here to exit editing (which re-grabs root focus).
+                    if (searchEditing) {
+                        return@onPreviewKeyEvent when (ev.key) {
+                            Key.ButtonB, Key.Back -> { searchEditing = false; true }
+                            else -> false
+                        }
+                    }
+                    when (ev.key) {
+                        Key.DirectionUp -> { catalogNav.navDir(PANE_DIR_UP); true }
+                        Key.DirectionDown -> { catalogNav.navDir(PANE_DIR_DOWN); true }
+                        Key.DirectionLeft -> { catalogNav.navDir(PANE_DIR_LEFT); true }
+                        Key.DirectionRight -> { catalogNav.navDir(PANE_DIR_RIGHT); true }
+                        Key.ButtonA, Key.Enter, Key.NumPadEnter, Key.DirectionCenter -> {
+                            catalogNav.navDir(PANE_DIR_ACTIVATE); true
+                        }
+                        Key.ButtonB, Key.Back -> { onDismiss(); true }
+                        else -> false
+                    }
+                }
+                .focusRequester(rootFocus)
+                .focusable()
+                .padding(16.dp)
+        ) {
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    stringResource(R.string.reshade_catalog_title),
+                    color = TextPrimary,
+                    fontSize = 15.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    modifier = Modifier.weight(1f)
+                )
+                Text(
+                    stringResource(R.string.reshade_catalog_done),
+                    color = AccentBlue,
+                    fontSize = SettingValueSize,
+                    fontWeight = FontWeight.Medium,
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(6.dp))
+                        .paneNavItem(cornerRadius = 6.dp, onActivate = onDismiss, isEntry = refocusId == null, highlightColor = NavHighlight)
+                        .clickable(onClick = onDismiss)
+                        .padding(horizontal = 10.dp, vertical = 4.dp)
+                )
+            }
+
+            if (offline && !loading) {
+                Spacer(Modifier.height(6.dp))
+                Text(
+                    stringResource(
+                        if (source == ReshadeCatalog.Source.CACHE) R.string.reshade_catalog_offline_cache
+                        else R.string.reshade_catalog_offline_none
+                    ),
+                    color = WarningAmber,
+                    fontSize = SettingLabelSize
+                )
+            }
+
+            Spacer(Modifier.height(10.dp))
+            ReshadeCatalogSearchField(
+                query = query,
+                onQueryChange = { query = it },
+                editing = searchEditing,
+                onEditingChange = { searchEditing = it },
+            )
+            Spacer(Modifier.height(8.dp))
+
+            errorMsg?.let {
+                Text(it, color = DangerRed, fontSize = SettingLabelSize, modifier = Modifier.padding(vertical = 4.dp))
+            }
+
+            if (loading) {
+                Box(Modifier.fillMaxWidth().weight(1f), contentAlignment = Alignment.Center) {
+                    Text(stringResource(R.string.reshade_catalog_downloading), color = TextSecondary, fontSize = SettingValueSize)
+                }
+            } else {
+                // Plain Column + verticalScroll (NOT LazyColumn): a LazyColumn only composes visible
+                // rows, so paneNav can't register or scroll past the on-screen items. Composing every
+                // row (~100) lets the D-pad walk the whole list and paneNavItem's bringIntoView scroll to
+                // the highlighted one — same pattern as ExtensionsPickerDialog. key() keeps the i_/a_
+                // prefixes so a downloaded row's Available->Installed hop still gets a fresh slot (reseat).
+                Column(
+                    Modifier
+                        .fillMaxWidth()
+                        .weight(1f)
+                        .verticalScroll(rememberScrollState())
+                ) {
+                    if (installedRows.isNotEmpty()) {
+                        ReshadeGroupHeader(stringResource(R.string.reshade_catalog_installed, installedRows.size))
+                        installedRows.forEach { entry ->
+                            key("i_${entry.id}") {
+                                ReshadeCatalogRow(
+                                    entry = entry,
+                                    isInstalled = true,
+                                    isSelected = entry.name.equals(selectedName, ignoreCase = true),
+                                    isBusy = downloadingId == entry.id,
+                                    offline = offline,
+                                    phaseLabel = if (downloadingId == entry.id) phaseLabel else "",
+                                    progress = if (downloadingId == entry.id) progress else null,
+                                    installingLabel = installingLabel,
+                                    isEntry = entry.id == refocusId,
+                                    onClick = {
+                                        // Select this installed effect as the active one, then close.
+                                        val idx = state.reshadeEffectEntries.value
+                                            .indexOfFirst { it.equals(entry.name, ignoreCase = true) }
+                                        if (idx >= 0) state.selectedReshadeEffect.intValue = idx
+                                        onDismiss()
+                                    }
+                                )
+                            }
+                        }
+                    }
+                    if (availableRows.isNotEmpty()) {
+                        ReshadeGroupHeader(stringResource(R.string.reshade_catalog_available, availableRows.size))
+                        availableRows.forEach { entry ->
+                            key("a_${entry.id}") {
+                                ReshadeCatalogRow(
+                                    entry = entry,
+                                    isInstalled = false,
+                                    isSelected = false,
+                                    isBusy = downloadingId == entry.id,
+                                    offline = offline,
+                                    phaseLabel = if (downloadingId == entry.id) phaseLabel else "",
+                                    progress = if (downloadingId == entry.id) progress else null,
+                                    installingLabel = installingLabel,
+                                    onClick = {
+                                        when {
+                                            downloadingId != null -> {}                 // one at a time
+                                            offline -> errorMsg = context.getString(R.string.reshade_catalog_needs_connection)
+                                            else -> startDownload(entry)
+                                        }
+                                    }
+                                )
+                            }
+                        }
+                    }
+                    if (installedRows.isEmpty() && availableRows.isEmpty()) {
+                        Text(
+                            if (query.isNotBlank()) stringResource(R.string.reshade_catalog_empty_query, query)
+                            else stringResource(R.string.reshade_catalog_empty),
+                            color = TextSecondary,
+                            fontSize = SettingValueSize,
+                            modifier = Modifier.padding(24.dp)
+                        )
+                    }
+                }
+            }
+        }
+      }
+    }
+}
+
+@Composable
+private fun ReshadeCatalogSearchField(
+    query: String,
+    onQueryChange: (String) -> Unit,
+    editing: Boolean,
+    onEditingChange: (Boolean) -> Unit,
+) {
+    val keyboard = LocalSoftwareKeyboardController.current
+    val focusRequester = remember { FocusRequester() }
+    val tapInteraction = remember { MutableInteractionSource() }
+    // The field is only focusable while the user is explicitly editing. Otherwise a recompose — e.g. a
+    // downloaded row hopping Available→Installed and disposing the focused node — could hand IME focus
+    // to this field and pop the keyboard. editing is armed only by a controller A press (onActivate) or
+    // a deliberate tap, so it never auto-acquires focus. editing is hoisted into ReshadeCatalogDialog so
+    // its root key-preview handler can stand down while the field is being typed into.
+    LaunchedEffect(editing) {
+        if (editing) {
+            runCatching { focusRequester.requestFocus() }
+            keyboard?.show()
+        }
+    }
+    BasicTextField(
+        value = query,
+        onValueChange = onQueryChange,
+        textStyle = TextStyle(color = TextPrimary, fontSize = SettingValueSize),
+        cursorBrush = SolidColor(AccentBlue),
+        singleLine = true,
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(EnvVarControlHeight)
+            .paneNavItem(cornerRadius = 8.dp, onActivate = { onEditingChange(true) }, highlightColor = NavHighlight)
+            .focusRequester(focusRequester)
+            .focusProperties { canFocus = editing }
+            .onFocusChanged { if (!it.isFocused) onEditingChange(false) }
+            .controllerTextFieldEscape(),
+        decorationBox = { innerTextField ->
+            Row(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .clip(RoundedCornerShape(8.dp))
+                    .background(InputSurface)
+                    .border(1.dp, InputBorder, RoundedCornerShape(8.dp))
+                    // Explicit tap arms editing before requesting focus, since canFocus is gated off
+                    // until then — this preserves touch: tapping the box still opens the keyboard.
+                    .clickable(interactionSource = tapInteraction, indication = null) { onEditingChange(true) }
+                    .padding(horizontal = SettingFieldHorizontalPadding),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Icon(Icons.Outlined.Search, contentDescription = null, tint = TextDim, modifier = Modifier.size(SettingIconSize))
+                Spacer(Modifier.width(8.dp))
+                Box(Modifier.weight(1f)) {
+                    if (query.isEmpty()) {
+                        Text(stringResource(R.string.reshade_catalog_search), color = TextDim, fontSize = SettingValueSize)
+                    }
+                    innerTextField()
+                }
+                if (query.isNotEmpty()) {
+                    Icon(
+                        Icons.Outlined.Close, contentDescription = null, tint = TextDim,
+                        modifier = Modifier
+                            .size(SettingIconSize)
+                            .paneNavItem(cornerRadius = 6.dp, onActivate = { onQueryChange("") }, highlightColor = NavHighlight)
+                            .clickable { onQueryChange("") }
+                    )
+                }
+            }
+        }
+    )
+}
+
+@Composable
+private fun ReshadeGroupHeader(text: String) {
+    Text(
+        text,
+        color = TextSecondary,
+        fontSize = SettingSectionLabelSize,
+        fontWeight = FontWeight.SemiBold,
+        letterSpacing = 0.5.sp,
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = 8.dp)
+    )
+}
+
+// One catalog row. Installed rows render full-opacity with a check when active; available rows render
+// greyed with a download (or offline) icon; a busy row shows a thin progress bar.
+@Composable
+private fun ReshadeCatalogRow(
+    entry: ReshadeCatalogEntry,
+    isInstalled: Boolean,
+    isSelected: Boolean,
+    isBusy: Boolean,
+    offline: Boolean,
+    phaseLabel: String,
+    progress: Float?,
+    installingLabel: String,
+    isEntry: Boolean = false,
+    onClick: () -> Unit,
+) {
+    val contentAlpha = if (isInstalled || isBusy) 1f else 0.5f
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(SettingFieldCorner))
+            .paneNavItem(cornerRadius = SettingFieldCorner, onActivate = { if (!isBusy) onClick() }, isEntry = isEntry, highlightColor = NavHighlight)
+            .clickable(enabled = !isBusy, onClick = onClick)
+            .padding(horizontal = 4.dp, vertical = 10.dp)
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
+            Column(Modifier.weight(1f)) {
+                Text(entry.name, color = TextPrimary.copy(alpha = contentAlpha), fontSize = SettingValueSize)
+                val sub = buildString {
+                    if (entry.category.isNotBlank()) append(entry.category)
+                    if (entry.author.isNotBlank()) { if (isNotEmpty()) append(" · "); append(entry.author) }
+                    if (entry.license.isNotBlank()) { if (isNotEmpty()) append(" · "); append(entry.license) }
+                }
+                if (sub.isNotBlank()) {
+                    Text(sub, color = TextSecondary.copy(alpha = contentAlpha), fontSize = SettingLabelSize)
+                }
+                if (entry.description.isNotBlank()) {
+                    Text(entry.description, color = TextDim.copy(alpha = contentAlpha), fontSize = SettingLabelSize, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                }
+            }
+            Spacer(Modifier.width(8.dp))
+            when {
+                isBusy -> {}
+                isInstalled -> {
+                    if (isSelected) Icon(Icons.Outlined.Check, contentDescription = null, tint = AccentBlue, modifier = Modifier.size(20.dp))
+                }
+                offline -> Icon(Icons.Outlined.CloudOff, contentDescription = null, tint = TextDim, modifier = Modifier.size(20.dp))
+                else -> Icon(Icons.Outlined.Download, contentDescription = null, tint = AccentBlue, modifier = Modifier.size(20.dp))
+            }
+        }
+        if (isBusy) {
+            Spacer(Modifier.height(6.dp))
+            val frac = progress?.coerceIn(0f, 1f) ?: 0f
+            val barColor = if (phaseLabel == installingLabel) Color(0xFF4CAF50) else AccentBlue
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                Text(phaseLabel, color = TextSecondary, fontSize = SettingLabelSize)
+                Text("${(frac * 100).toInt()}%", color = TextSecondary, fontSize = SettingLabelSize)
+            }
+            Spacer(Modifier.height(3.dp))
+            Box(
+                Modifier
+                    .fillMaxWidth()
+                    .height(4.dp)
+                    .clip(RoundedCornerShape(2.dp))
+                    .background(SliderInactive)
+            ) {
+                Box(
+                    Modifier
+                        .fillMaxWidth(frac)
+                        .height(4.dp)
+                        .clip(RoundedCornerShape(2.dp))
+                        .background(barColor)
+                )
             }
         }
     }

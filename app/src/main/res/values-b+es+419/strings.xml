@@ -1566,4 +1566,24 @@ Ruta instalada:
     <string name="file_manager_create_folder_failed">La creación de la carpeta falló</string>
 
     <string name="settings_content_refresh">Actualizar</string>
+    <!-- ReShade -->
+    <string name="reshade_section_title">ReShade</string>
+    <string name="reshade_effect_label">Efecto ReShade</string>
+    <string name="reshade_none">Ninguno</string>
+    <string name="reshade_section_hint">Aplica un efecto ReShade (.fx) a los juegos DXVK/VKD3D (Vulkan) mediante la capa vkBasalt integrada. Coloca cada efecto en su propia carpeta en Android/data/&lt;package&gt;/files/ReShade/. El ajuste de parámetros en vivo y el interruptor en el juego llegarán con la actualización de la capa de recarga en caliente.</string>
+    <string name="reshade_empty_hint">No se encontraron efectos. Añade una carpeta de efecto ReShade (el .fx más cualquier .fxh/texturas) en Android/data/&lt;package&gt;/files/ReShade/.</string>
+    <string name="reshade_browse">Explorar &amp; descargar efectos</string>
+    <string name="reshade_catalog_title">Efectos ReShade</string>
+    <string name="reshade_catalog_search">Buscar efectos…</string>
+    <string name="reshade_catalog_installed">Instalados (%1$d)</string>
+    <string name="reshade_catalog_available">Disponibles (%1$d)</string>
+    <string name="reshade_catalog_downloading">Descargando</string>
+    <string name="reshade_catalog_installing">Instalando</string>
+    <string name="reshade_catalog_offline_cache">Sin conexión — mostrando una lista en caché. Conéctate para descargar nuevos efectos.</string>
+    <string name="reshade_catalog_offline_none">Sin conexión — mostrando solo los efectos instalados. Conéctate para explorar el catálogo.</string>
+    <string name="reshade_catalog_needs_connection">Conéctate a Internet para descargar efectos.</string>
+    <string name="reshade_catalog_download_failed">No se pudo descargar %1$s.</string>
+    <string name="reshade_catalog_empty_query">Ningún efecto coincide con \"%1$s\".</string>
+    <string name="reshade_catalog_empty">No hay efectos disponibles. Conéctate a Internet para explorar el catálogo.</string>
+    <string name="reshade_catalog_done">Listo</string>
 </resources>

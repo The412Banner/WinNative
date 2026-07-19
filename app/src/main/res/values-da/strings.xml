@@ -1570,4 +1570,24 @@ Installeret sti:
     <string name="steam_chat_setting_stay_running">Kør i baggrunden</string>
     <string name="steam_chat_setting_stay_running_desc">Hold chatten kørende, efter du afslutter WinNative</string>
     <string name="settings_content_refresh">Opdater</string>
+    <!-- ReShade -->
+    <string name="reshade_section_title">ReShade</string>
+    <string name="reshade_effect_label">ReShade-effekt</string>
+    <string name="reshade_none">Ingen</string>
+    <string name="reshade_section_hint">Anvend en ReShade-effekt (.fx) på DXVK/VKD3D-spil (Vulkan) via det indbyggede vkBasalt-lag. Læg hver effekt i sin egen mappe under Android/data/&lt;package&gt;/files/ReShade/. Justering af parametre i realtid og kontakten i spillet kommer med opdateringen af live-reload-laget.</string>
+    <string name="reshade_empty_hint">Ingen effekter fundet. Tilføj en ReShade-effektmappe (.fx plus eventuelle .fxh/teksturer) under Android/data/&lt;package&gt;/files/ReShade/.</string>
+    <string name="reshade_browse">Gennemse &amp; download effekter</string>
+    <string name="reshade_catalog_title">ReShade-effekter</string>
+    <string name="reshade_catalog_search">Søg efter effekter…</string>
+    <string name="reshade_catalog_installed">Installeret (%1$d)</string>
+    <string name="reshade_catalog_available">Tilgængelige (%1$d)</string>
+    <string name="reshade_catalog_downloading">Downloader</string>
+    <string name="reshade_catalog_installing">Installerer</string>
+    <string name="reshade_catalog_offline_cache">Offline — viser en cachelagret liste. Opret forbindelse for at downloade nye effekter.</string>
+    <string name="reshade_catalog_offline_none">Offline — viser kun installerede effekter. Opret forbindelse for at gennemse kataloget.</string>
+    <string name="reshade_catalog_needs_connection">Opret forbindelse til internettet for at downloade effekter.</string>
+    <string name="reshade_catalog_download_failed">Kunne ikke downloade %1$s.</string>
+    <string name="reshade_catalog_empty_query">Ingen effekter matcher \"%1$s\".</string>
+    <string name="reshade_catalog_empty">Ingen effekter tilgængelige. Opret forbindelse til internettet for at gennemse kataloget.</string>
+    <string name="reshade_catalog_done">Færdig</string>
 </resources>

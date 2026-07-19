@@ -1566,4 +1566,24 @@ Asennuspolku:
     <string name="file_manager_create_folder_failed">Kansion luonti epäonnistui</string>
 
     <string name="settings_content_refresh">Päivitä</string>
+    <!-- ReShade -->
+    <string name="reshade_section_title">ReShade</string>
+    <string name="reshade_effect_label">ReShade-tehoste</string>
+    <string name="reshade_none">Ei mitään</string>
+    <string name="reshade_section_hint">Käytä ReShade-tehostetta (.fx) DXVK/VKD3D-peleissä (Vulkan) sisäänrakennetun vkBasalt-kerroksen kautta. Sijoita jokainen tehoste omaan kansioonsa polkuun Android/data/&lt;package&gt;/files/ReShade/. Reaaliaikainen parametrien säätö ja pelinsisäinen kytkin tulevat live-reload-kerroksen päivityksen myötä.</string>
+    <string name="reshade_empty_hint">Tehosteita ei löytynyt. Lisää ReShade-tehostekansio (.fx sekä mahdolliset .fxh/tekstuurit) polkuun Android/data/&lt;package&gt;/files/ReShade/.</string>
+    <string name="reshade_browse">Selaa &amp; lataa tehosteita</string>
+    <string name="reshade_catalog_title">ReShade-tehosteet</string>
+    <string name="reshade_catalog_search">Hae tehosteita…</string>
+    <string name="reshade_catalog_installed">Asennettu (%1$d)</string>
+    <string name="reshade_catalog_available">Saatavilla (%1$d)</string>
+    <string name="reshade_catalog_downloading">Ladataan</string>
+    <string name="reshade_catalog_installing">Asennetaan</string>
+    <string name="reshade_catalog_offline_cache">Offline — näytetään välimuistiin tallennettu luettelo. Muodosta yhteys ladataksesi uusia tehosteita.</string>
+    <string name="reshade_catalog_offline_none">Offline — näytetään vain asennetut tehosteet. Muodosta yhteys selataksesi luetteloa.</string>
+    <string name="reshade_catalog_needs_connection">Muodosta internetyhteys ladataksesi tehosteita.</string>
+    <string name="reshade_catalog_download_failed">Kohteen %1$s lataaminen epäonnistui.</string>
+    <string name="reshade_catalog_empty_query">Mikään tehoste ei vastaa hakua \"%1$s\".</string>
+    <string name="reshade_catalog_empty">Ei tehosteita saatavilla. Muodosta internetyhteys selataksesi luetteloa.</string>
+    <string name="reshade_catalog_done">Valmis</string>
 </resources>

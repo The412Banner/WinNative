@@ -1505,4 +1505,24 @@
     <string name="steam_chat_setting_stay_running">बैकग्राउंड में चलाएँ</string>
     <string name="steam_chat_setting_stay_running_desc">WinNative से बाहर निकलने के बाद चैट चालू रखें</string>
     <string name="settings_content_refresh">रीफ़्रेश</string>
+    <!-- ReShade -->
+    <string name="reshade_section_title">ReShade</string>
+    <string name="reshade_effect_label">ReShade प्रभाव</string>
+    <string name="reshade_none">कोई नहीं</string>
+    <string name="reshade_section_hint">अंतर्निहित vkBasalt लेयर के माध्यम से DXVK/VKD3D (Vulkan) गेम पर ReShade प्रभाव (.fx) लागू करें। प्रत्येक प्रभाव को Android/data/&lt;package&gt;/files/ReShade/ के अंतर्गत उसके अपने फ़ोल्डर में रखें। लाइव पैरामीटर ट्यूनिंग और इन-गेम टॉगल लाइव-रीलोड लेयर अपडेट के साथ आएंगे।</string>
+    <string name="reshade_empty_hint">कोई प्रभाव नहीं मिला। Android/data/&lt;package&gt;/files/ReShade/ के अंतर्गत एक ReShade प्रभाव फ़ोल्डर (.fx के साथ कोई भी .fxh/टेक्सचर) जोड़ें।</string>
+    <string name="reshade_browse">प्रभाव ब्राउज़ करें &amp; डाउनलोड करें</string>
+    <string name="reshade_catalog_title">ReShade प्रभाव</string>
+    <string name="reshade_catalog_search">प्रभाव खोजें…</string>
+    <string name="reshade_catalog_installed">इंस्टॉल किए गए (%1$d)</string>
+    <string name="reshade_catalog_available">उपलब्ध (%1$d)</string>
+    <string name="reshade_catalog_downloading">डाउनलोड हो रहा है</string>
+    <string name="reshade_catalog_installing">इंस्टॉल हो रहा है</string>
+    <string name="reshade_catalog_offline_cache">ऑफ़लाइन — एक कैश की गई सूची दिखाई जा रही है। नए प्रभाव डाउनलोड करने के लिए कनेक्ट करें।</string>
+    <string name="reshade_catalog_offline_none">ऑफ़लाइन — केवल इंस्टॉल किए गए प्रभाव दिखाए जा रहे हैं। कैटलॉग ब्राउज़ करने के लिए कनेक्ट करें।</string>
+    <string name="reshade_catalog_needs_connection">प्रभाव डाउनलोड करने के लिए इंटरनेट से कनेक्ट करें।</string>
+    <string name="reshade_catalog_download_failed">%1$s डाउनलोड करने में विफल।</string>
+    <string name="reshade_catalog_empty_query">\"%1$s\" से कोई प्रभाव मेल नहीं खाता।</string>
+    <string name="reshade_catalog_empty">कोई प्रभाव उपलब्ध नहीं। कैटलॉग ब्राउज़ करने के लिए इंटरनेट से कनेक्ट करें।</string>
+    <string name="reshade_catalog_done">पूर्ण</string>
 </resources>

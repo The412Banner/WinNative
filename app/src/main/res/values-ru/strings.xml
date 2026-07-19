@@ -1475,4 +1475,24 @@
     <string name="steam_chat_setting_stay_running">Работать в фоне</string>
     <string name="steam_chat_setting_stay_running_desc">Оставлять чат активным после выхода из WinNative</string>
     <string name="settings_content_refresh">Обновить</string>
+    <!-- ReShade -->
+    <string name="reshade_section_title">ReShade</string>
+    <string name="reshade_effect_label">Эффект ReShade</string>
+    <string name="reshade_none">Нет</string>
+    <string name="reshade_section_hint">Применяйте эффект ReShade (.fx) к играм DXVK/VKD3D (Vulkan) через встроенный слой vkBasalt. Поместите каждый эффект в отдельную папку в Android/data/&lt;package&gt;/files/ReShade/. Настройка параметров в реальном времени и переключатель в игре появятся с обновлением слоя с горячей перезагрузкой.</string>
+    <string name="reshade_empty_hint">Эффекты не найдены. Добавьте папку эффекта ReShade (.fx и любые .fxh/текстуры) в Android/data/&lt;package&gt;/files/ReShade/.</string>
+    <string name="reshade_browse">Обзор &amp; загрузка эффектов</string>
+    <string name="reshade_catalog_title">Эффекты ReShade</string>
+    <string name="reshade_catalog_search">Поиск эффектов…</string>
+    <string name="reshade_catalog_installed">Установлено (%1$d)</string>
+    <string name="reshade_catalog_available">Доступно (%1$d)</string>
+    <string name="reshade_catalog_downloading">Загрузка</string>
+    <string name="reshade_catalog_installing">Установка</string>
+    <string name="reshade_catalog_offline_cache">Не в сети — показан кешированный список. Подключитесь, чтобы загрузить новые эффекты.</string>
+    <string name="reshade_catalog_offline_none">Не в сети — показаны только установленные эффекты. Подключитесь, чтобы просмотреть каталог.</string>
+    <string name="reshade_catalog_needs_connection">Подключитесь к интернету, чтобы загрузить эффекты.</string>
+    <string name="reshade_catalog_download_failed">Не удалось загрузить %1$s.</string>
+    <string name="reshade_catalog_empty_query">Нет эффектов, соответствующих \"%1$s\".</string>
+    <string name="reshade_catalog_empty">Нет доступных эффектов. Подключитесь к интернету, чтобы просмотреть каталог.</string>
+    <string name="reshade_catalog_done">Готово</string>
 </resources>

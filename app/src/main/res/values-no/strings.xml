@@ -1566,4 +1566,24 @@ Installert bane:
     <string name="file_manager_create_folder_failed">Oppretting av mappe mislyktes</string>
 
     <string name="settings_content_refresh">Oppdater</string>
+    <!-- ReShade -->
+    <string name="reshade_section_title">ReShade</string>
+    <string name="reshade_effect_label">ReShade-effekt</string>
+    <string name="reshade_none">Ingen</string>
+    <string name="reshade_section_hint">Bruk en ReShade-effekt (.fx) på DXVK/VKD3D-spill (Vulkan) via det innebygde vkBasalt-laget. Legg hver effekt i sin egen mappe under Android/data/&lt;package&gt;/files/ReShade/. Justering av parametere i sanntid og bryteren i spillet kommer med oppdateringen av live-reload-laget.</string>
+    <string name="reshade_empty_hint">Ingen effekter funnet. Legg til en ReShade-effektmappe (.fx pluss eventuelle .fxh/teksturer) under Android/data/&lt;package&gt;/files/ReShade/.</string>
+    <string name="reshade_browse">Bla gjennom &amp; last ned effekter</string>
+    <string name="reshade_catalog_title">ReShade-effekter</string>
+    <string name="reshade_catalog_search">Søk etter effekter…</string>
+    <string name="reshade_catalog_installed">Installert (%1$d)</string>
+    <string name="reshade_catalog_available">Tilgjengelige (%1$d)</string>
+    <string name="reshade_catalog_downloading">Laster ned</string>
+    <string name="reshade_catalog_installing">Installerer</string>
+    <string name="reshade_catalog_offline_cache">Frakoblet — viser en bufret liste. Koble til for å laste ned nye effekter.</string>
+    <string name="reshade_catalog_offline_none">Frakoblet — viser bare installerte effekter. Koble til for å bla gjennom katalogen.</string>
+    <string name="reshade_catalog_needs_connection">Koble til internett for å laste ned effekter.</string>
+    <string name="reshade_catalog_download_failed">Kunne ikke laste ned %1$s.</string>
+    <string name="reshade_catalog_empty_query">Ingen effekter samsvarer med \"%1$s\".</string>
+    <string name="reshade_catalog_empty">Ingen effekter tilgjengelige. Koble til internett for å bla gjennom katalogen.</string>
+    <string name="reshade_catalog_done">Ferdig</string>
 </resources>

@@ -30,6 +30,8 @@ import com.winlator.cmod.app.PluviaApp
 import com.winlator.cmod.feature.library.DriveItem
 import com.winlator.cmod.feature.library.EnvVarItem
 import com.winlator.cmod.feature.library.parseEnvVarItems
+import com.winlator.cmod.feature.library.reshadeParamsToJson
+import com.winlator.cmod.feature.library.seedReshadeParams
 import androidx.compose.runtime.getValue
 import com.winlator.cmod.feature.library.GameSettingsCallbacks
 import com.winlator.cmod.feature.library.GameSettingsContent
@@ -471,6 +473,30 @@ class ShortcutSettingsComposeDialog private constructor(
                 .toIntOrNull()
                 ?.coerceIn(0, 100)
                 ?: 100
+
+        // ReShade drop-in effect (per-game; persisted as the effect's folder name, "None" = index 0)
+        val reshadeEntries = ArrayList<String>()
+        reshadeEntries.add(context.getString(R.string.reshade_none))
+        reshadeEntries.addAll(com.winlator.cmod.runtime.reshade.ReshadeManager.scanEffectNames(context))
+        state.reshadeEffectEntries.value = reshadeEntries
+        val savedReshade = getShortcutSetting(
+            com.winlator.cmod.runtime.reshade.ReshadeConfigWriter.EXTRA_EFFECT,
+            container.getExtra(com.winlator.cmod.runtime.reshade.ReshadeConfigWriter.EXTRA_EFFECT, "")
+        )
+        val reshadeIdx = reshadeEntries.indexOfFirst { it.equals(savedReshade, ignoreCase = true) }
+        state.selectedReshadeEffect.intValue = if (reshadeIdx >= 0) reshadeIdx else 0
+
+        // Seed the per-effect param model from the saved reshadeParams JSON + .fx defaults so the
+        // pre-launch controls open on the persisted values (launch path applies the same key scheme).
+        val savedReshadeParams = getShortcutSetting(
+            com.winlator.cmod.runtime.reshade.ReshadeConfigWriter.EXTRA_PARAMS,
+            container.getExtra(com.winlator.cmod.runtime.reshade.ReshadeConfigWriter.EXTRA_PARAMS, "")
+        )
+        val loadedReshadeEffect = if (reshadeIdx >= 1) reshadeEntries[reshadeIdx] else ""
+        state.reshadeSavedEffect.value = loadedReshadeEffect
+        state.reshadeSavedParamsJson.value = savedReshadeParams
+        seedReshadeParams(
+            context, state, loadedReshadeEffect.ifEmpty { null }, savedReshadeParams)
 
         // Graphics driver (basic entries - will be updated after contents sync)
         val graphicsDriverArr =
@@ -1216,6 +1242,27 @@ class ShortcutSettingsComposeDialog private constructor(
                 shortcut.putExtra("sgsrEnabled", null)
                 shortcut.putExtra("sgsrUpscaleMode", null)
                 shortcut.putExtra("sgsrSharpness", null)
+            }
+
+            // ReShade drop-in effect + per-uniform params (per-game). Route through saveOverride so they
+            // participate in the container-defaults flag: a bare putExtra left hasContainerOverride false,
+            // so a shortcut whose only change was ReShade got use_container_defaults=1 and getSettingExtra
+            // shadowed its own reshadeEffect/reshadeParams with the container value on read. Index 0 = None.
+            run {
+                val reshadeEntries = state.reshadeEffectEntries.value
+                val idx = state.selectedReshadeEffect.intValue
+                val effectName = if (idx in 1 until reshadeEntries.size) reshadeEntries[idx] else ""
+                hasContainerOverride = hasContainerOverride or saveOverride(
+                    com.winlator.cmod.runtime.reshade.ReshadeConfigWriter.EXTRA_EFFECT,
+                    effectName,
+                    container.getExtra(com.winlator.cmod.runtime.reshade.ReshadeConfigWriter.EXTRA_EFFECT, "")
+                )
+                val reshadeParams = if (effectName.isEmpty()) "" else (reshadeParamsToJson(state) ?: "")
+                hasContainerOverride = hasContainerOverride or saveOverride(
+                    com.winlator.cmod.runtime.reshade.ReshadeConfigWriter.EXTRA_PARAMS,
+                    reshadeParams,
+                    container.getExtra(com.winlator.cmod.runtime.reshade.ReshadeConfigWriter.EXTRA_PARAMS, "")
+                )
             }
 
             // Desktop Theme — stored as compound "THEME,TYPE,COLOR" string

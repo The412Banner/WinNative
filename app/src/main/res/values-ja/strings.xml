@@ -1566,4 +1566,24 @@
     <string name="file_manager_create_folder_failed">フォルダの作成に失敗しました</string>
 
     <string name="settings_content_refresh">更新</string>
+    <!-- ReShade -->
+    <string name="reshade_section_title">ReShade</string>
+    <string name="reshade_effect_label">ReShade エフェクト</string>
+    <string name="reshade_none">なし</string>
+    <string name="reshade_section_hint">内蔵の vkBasalt レイヤーを介して DXVK/VKD3D（Vulkan）ゲームに ReShade エフェクト（.fx）を適用します。各エフェクトを Android/data/&lt;package&gt;/files/ReShade/ 以下の専用フォルダーに配置してください。ライブパラメーター調整とゲーム内トグルは、ライブリロードレイヤーの更新で提供されます。</string>
+    <string name="reshade_empty_hint">エフェクトが見つかりません。Android/data/&lt;package&gt;/files/ReShade/ 以下に ReShade エフェクトフォルダー（.fx と必要な .fxh/テクスチャ）を追加してください。</string>
+    <string name="reshade_browse">エフェクトを参照 &amp; ダウンロード</string>
+    <string name="reshade_catalog_title">ReShade エフェクト</string>
+    <string name="reshade_catalog_search">エフェクトを検索…</string>
+    <string name="reshade_catalog_installed">インストール済み (%1$d)</string>
+    <string name="reshade_catalog_available">利用可能 (%1$d)</string>
+    <string name="reshade_catalog_downloading">ダウンロード中</string>
+    <string name="reshade_catalog_installing">インストール中</string>
+    <string name="reshade_catalog_offline_cache">オフライン — キャッシュされたリストを表示しています。新しいエフェクトをダウンロードするには接続してください。</string>
+    <string name="reshade_catalog_offline_none">オフライン — インストール済みのエフェクトのみ表示しています。カタログを参照するには接続してください。</string>
+    <string name="reshade_catalog_needs_connection">エフェクトをダウンロードするにはインターネットに接続してください。</string>
+    <string name="reshade_catalog_download_failed">%1$s のダウンロードに失敗しました。</string>
+    <string name="reshade_catalog_empty_query">\"%1$s\" に一致するエフェクトはありません。</string>
+    <string name="reshade_catalog_empty">利用可能なエフェクトがありません。カタログを参照するにはインターネットに接続してください。</string>
+    <string name="reshade_catalog_done">完了</string>
 </resources>

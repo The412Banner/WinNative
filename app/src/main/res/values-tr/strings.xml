@@ -1566,4 +1566,24 @@ Yüklü konum:
     <string name="file_manager_create_folder_failed">Klasör oluşturma başarısız oldu</string>
 
     <string name="settings_content_refresh">Yenile</string>
+    <!-- ReShade -->
+    <string name="reshade_section_title">ReShade</string>
+    <string name="reshade_effect_label">ReShade efekti</string>
+    <string name="reshade_none">Hiçbiri</string>
+    <string name="reshade_section_hint">Yerleşik vkBasalt katmanı aracılığıyla DXVK/VKD3D (Vulkan) oyunlarına bir ReShade efekti (.fx) uygulayın. Her efekti Android/data/&lt;package&gt;/files/ReShade/ altında kendi klasörüne yerleştirin. Canlı parametre ayarı ve oyun içi anahtar, canlı yeniden yükleme katmanı güncellemesiyle gelecek.</string>
+    <string name="reshade_empty_hint">Efekt bulunamadı. Android/data/&lt;package&gt;/files/ReShade/ altına bir ReShade efekt klasörü (.fx ve varsa .fxh/dokular) ekleyin.</string>
+    <string name="reshade_browse">Efektlere göz at &amp; indir</string>
+    <string name="reshade_catalog_title">ReShade efektleri</string>
+    <string name="reshade_catalog_search">Efekt ara…</string>
+    <string name="reshade_catalog_installed">Yüklü (%1$d)</string>
+    <string name="reshade_catalog_available">Kullanılabilir (%1$d)</string>
+    <string name="reshade_catalog_downloading">İndiriliyor</string>
+    <string name="reshade_catalog_installing">Yükleniyor</string>
+    <string name="reshade_catalog_offline_cache">Çevrimdışı — önbelleğe alınmış bir liste gösteriliyor. Yeni efektler indirmek için bağlanın.</string>
+    <string name="reshade_catalog_offline_none">Çevrimdışı — yalnızca yüklü efektler gösteriliyor. Kataloğa göz atmak için bağlanın.</string>
+    <string name="reshade_catalog_needs_connection">Efekt indirmek için internete bağlanın.</string>
+    <string name="reshade_catalog_download_failed">%1$s indirilemedi.</string>
+    <string name="reshade_catalog_empty_query">\"%1$s\" ile eşleşen efekt yok.</string>
+    <string name="reshade_catalog_empty">Kullanılabilir efekt yok. Kataloğa göz atmak için internete bağlanın.</string>
+    <string name="reshade_catalog_done">Bitti</string>
 </resources>

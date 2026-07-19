@@ -83,6 +83,7 @@ import com.winlator.cmod.shared.android.AppUtils;
 import com.winlator.cmod.shared.android.AppTerminationHelper;
 import com.winlator.cmod.shared.ui.toast.WinToast;
 import com.winlator.cmod.runtime.wine.EnvVars;
+import com.winlator.cmod.runtime.reshade.ReshadeConfigWriter;
 import com.winlator.cmod.runtime.wine.LocaleEnv;
 import com.winlator.cmod.shared.io.FileUtils;
 import com.winlator.cmod.runtime.system.CPUStatus;
@@ -203,6 +204,9 @@ public class XServerDisplayActivity extends FixedFontScaleAppCompatActivity {
     private static final String STEAM_ROOT_PATH = "C:\\Program Files (x86)\\Steam";
     private static final String STEAM_EXE_PATH = STEAM_ROOT_PATH + "\\steam.exe";
     private static final String D8VK_ASSET_PATH = "dxwrapper/d8vk-1.0.tzst";
+    // Bump whenever assets/graphics_driver/extra_libs.tzst is repacked, so EXISTING containers
+    // re-extract it (e.g. to pick up the patched libvkbasalt.so). Marker: usr/lib/.extra_libs_version.
+    private static final int EXTRA_LIBS_VERSION = 1;
     private static final String STEAM_USER_REGISTRY_BACKUP_FILE = "steam_registry_backup.reg";
     private static final String STEAM_SYSTEM_REGISTRY_BACKUP_FILE = "steam_system_registry_backup.reg";
     private static final String STEAM_CLIENT_STORE_RELATIVE_PATH = ".shared/steam-client-store";
@@ -663,6 +667,24 @@ public class XServerDisplayActivity extends FixedFontScaleAppCompatActivity {
 
     private String getShortcutSetting(String key, String containerValue) {
         return shortcut != null ? shortcut.getSettingExtra(key, containerValue) : containerValue;
+    }
+
+    // Resolve the selected ReShade drop-in effect (shortcut override, else container) and hand it to
+    // ReshadeConfigWriter, which stages the effect files, writes vkBasalt.conf, and sets the enabling
+    // env when applicable. Fully self-contained + swallowed: a ReShade failure must never break a
+    // launch.
+    private void applyReshadeEnv(EnvVars envVars) {
+        try {
+            if (container == null || imageFs == null) return;
+            String effect = getShortcutSetting(
+                    ReshadeConfigWriter.EXTRA_EFFECT, container.getExtra(ReshadeConfigWriter.EXTRA_EFFECT));
+            String params = getShortcutSetting(
+                    ReshadeConfigWriter.EXTRA_PARAMS, container.getExtra(ReshadeConfigWriter.EXTRA_PARAMS));
+            boolean vulkanWrapper = ReshadeConfigWriter.supportedFor(this.dxwrapper);
+            ReshadeConfigWriter.apply(this, imageFs, effect, params, vulkanWrapper, envVars);
+        } catch (Exception e) {
+            Log.e("XServerDisplayActivity", "ReShade env injection failed (ignored)", e);
+        }
     }
 
     private boolean getBooleanSessionOption(String key, boolean defaultValue) {
@@ -6417,6 +6439,13 @@ public class XServerDisplayActivity extends FixedFontScaleAppCompatActivity {
                     "' effective='" + effectiveCustomEnvVars + "'");
             envVars.putAll(effectiveCustomEnvVars);
 
+            // ReShade (vkBasalt) — apply the per-game/container selected drop-in effect via the
+            // already-bundled vkBasalt implicit layer. No-op unless an effect is selected AND the DX
+            // wrapper is Vulkan-backed (DXVK/VKD3D). Runs after custom env: if the user already set
+            // ENABLE_VKBASALT themselves, ReshadeConfigWriter detects it and backs off (user wins).
+            // Never throws into the launch path.
+            applyReshadeEnv(envVars);
+
             // Steam-style launch options: KEY=VALUE tokens before %command% become env vars.
             String launchOptsForEnv = shortcut != null
                     ? getShortcutSetting("execArgs", container.getExecArgs())
@@ -7662,7 +7691,7 @@ public class XServerDisplayActivity extends FixedFontScaleAppCompatActivity {
             Log.d("XServerDisplayActivity", "First time container boot, re-extracting libs");
             TarCompressorUtils.extract(TarCompressorUtils.Type.ZSTD, this, "graphics_driver/wrapper" + ".tzst", rootDir);
             TarCompressorUtils.extract(TarCompressorUtils.Type.ZSTD, this, "layers" + ".tzst", rootDir);
-            TarCompressorUtils.extract(TarCompressorUtils.Type.ZSTD, this, "graphics_driver/extra_libs" + ".tzst", rootDir);
+            // extra_libs.tzst handled by the version-aware block below (covers first boot too).
             if (wineInfo != null && wineInfo.isArm64EC() && !GPUInformation.getRenderer(null, null).contains("Mali")) {
                 try {
                     TarCompressorUtils.extract(TarCompressorUtils.Type.ZSTD, this, "graphics_driver/zink_dlls.tzst", new File(rootDir, ImageFs.WINEPREFIX + "/drive_c/windows"));
@@ -7670,6 +7699,26 @@ public class XServerDisplayActivity extends FixedFontScaleAppCompatActivity {
                     Log.w("XServerDisplayActivity", "zink_dlls.tzst not found or extraction failed", e);
                 }
             }
+        }
+
+        // Version-aware extract of extra_libs.tzst so EXISTING containers pick up an updated bundled
+        // layer (the patched libvkbasalt.so) without a full imagefs reinstall. The tzst holds only
+        // usr/lib/*.so + usr/share/vulkan/* (no home/drive_c), so game saves are untouched.
+        try {
+            File extraLibsMarker = new File(rootDir, "usr/lib/.extra_libs_version");
+            int installedExtraLibsVer = -1;
+            if (extraLibsMarker.exists()) {
+                try { installedExtraLibsVer = Integer.parseInt(FileUtils.readString(extraLibsMarker).trim()); }
+                catch (Exception ignored) {}
+            }
+            if (installedExtraLibsVer != EXTRA_LIBS_VERSION) {
+                Log.i("XServerDisplayActivity", "extra_libs outdated (installed=" + installedExtraLibsVer
+                        + " bundled=" + EXTRA_LIBS_VERSION + ") — re-extracting");
+                TarCompressorUtils.extract(TarCompressorUtils.Type.ZSTD, this, "graphics_driver/extra_libs.tzst", rootDir);
+                FileUtils.writeString(extraLibsMarker, String.valueOf(EXTRA_LIBS_VERSION));
+            }
+        } catch (Exception e) {
+            Log.w("XServerDisplayActivity", "extra_libs version check failed", e);
         }
 
         // FFmpeg 8 libs for Wine's winedmo media path (arm64ec native Wine only; these
